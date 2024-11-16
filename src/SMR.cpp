@@ -14,6 +14,8 @@
 
 #include "GoalVisitor.hpp"
 
+#include "ompl/control/spaces/DiscreteControlSpace.h"
+
 #define foreach BOOST_FOREACH
 
 namespace ompl
@@ -33,9 +35,8 @@ namespace ompl
     }  // namespace magic
 }  // namespace ompl
 
-ompl::geometric::SMR::SMR(const base::SpaceInformationPtr &si, bool starStrategy)
+ompl::control::SMR::SMR(const base::SpaceInformationPtr &si)
   : base::Planner(si, "SMR")
-  , starStrategy_(starStrategy)
   , stateProperty_(boost::get(vertex_state_t(), g_))
   , totalConnectionAttemptsProperty_(boost::get(vertex_total_connection_attempts_t(), g_))
   , successfulConnectionAttemptsProperty_(boost::get(vertex_successful_connection_attempts_t(), g_))
@@ -47,9 +48,9 @@ ompl::geometric::SMR::SMR(const base::SpaceInformationPtr &si, bool starStrategy
     specs_.optimizingPaths = true;
     specs_.multithreaded = true;
 
-    if (!starStrategy_)
-        Planner::declareParam<unsigned int>("max_nearest_neighbors", this, &SMR::setMaxNearestNeighbors,
-                                            &SMR::getMaxNearestNeighbors, std::string("8:1000"));
+    
+    Planner::declareParam<unsigned int>("max_nearest_neighbors", this, &SMR::setMaxNearestNeighbors,
+                                        &SMR::getMaxNearestNeighbors, std::string("8:1000"));
 
     addPlannerProgressProperty("iterations INTEGER", [this] { return getIterationCount(); });
     addPlannerProgressProperty("best cost REAL", [this] { return getBestCost(); });
@@ -57,74 +58,12 @@ ompl::geometric::SMR::SMR(const base::SpaceInformationPtr &si, bool starStrategy
     addPlannerProgressProperty("edge count INTEGER", [this] { return getEdgeCountString(); });
 }
 
-ompl::geometric::SMR::SMR(const base::PlannerData &data, bool starStrategy)
-  : SMR(data.getSpaceInformation(), starStrategy)
-{
-    if (data.numVertices() > 0)          
-    {
-        // mapping between vertex id from PlannerData and Vertex in Boost.Graph
-        std::map<unsigned int, Vertex> vertices;
-        // helper function to create vertices as needed and update the vertices mapping
-        const auto &getOrCreateVertex = [&](unsigned int vertex_index)
-        {
-            if (!vertices.count(vertex_index))
-            {
-                const auto &data_vertex = data.getVertex(vertex_index);
-                Vertex graph_vertex = boost::add_vertex(g_);
-                stateProperty_[graph_vertex] = si_->cloneState(data_vertex.getState());
-                totalConnectionAttemptsProperty_[graph_vertex] = 1;
-                successfulConnectionAttemptsProperty_[graph_vertex] = 0;
-                vertices[vertex_index] = graph_vertex;
-            }
-            return vertices.at(vertex_index);
-        };
-
-        specs_.multithreaded = false;  // temporarily set to false since nn_ is used only in single thread
-        nn_.reset(tools::SelfConfig::getDefaultNearestNeighbors<Vertex>(this));
-        specs_.multithreaded = true;
-        nn_->setDistanceFunction([this](const Vertex a, const Vertex b) { return distanceFunction(a, b); });
-
-        // Initialize Disjoint Sets
-        for (size_t vertex_index = 0; vertex_index < data.numVertices(); ++vertex_index)
-        {
-            Vertex m = getOrCreateVertex(vertex_index);
-            disjointSets_.make_set(m);  // Initialize each vertex as a separate set
-        }
-
-        for (size_t vertex_index = 0; vertex_index < data.numVertices(); ++vertex_index)
-        {
-            Vertex m = getOrCreateVertex(vertex_index);
-            std::vector<unsigned int> neighbor_indices;
-            data.getEdges(vertex_index, neighbor_indices);
-
-            for (const unsigned int neighbor_index : neighbor_indices)
-            {
-                Vertex n = getOrCreateVertex(neighbor_index);
-
-                totalConnectionAttemptsProperty_[n]++;
-                successfulConnectionAttemptsProperty_[n]++;
-
-                base::Cost weight;
-                data.getEdgeWeight(vertex_index, neighbor_index,
-                                   &weight);  // Get the weight of the edge
-                const Graph::edge_property_type properties(weight);
-
-                boost::add_edge(m, n, properties, g_);  // Add the edge to the graph
-
-                uniteComponents(m, n);
-            }
-
-            nn_->add(m);  // Add the vertex to the nearest neighbor data structure
-        }
-    }
-}
-
-ompl::geometric::SMR::~SMR()
+ompl::control::SMR::~SMR()
 {
     freeMemory();
 }
 
-void ompl::geometric::SMR::setup()
+void ompl::control::SMR::setup()
 {
     Planner::setup();
     if (!nn_)
@@ -135,7 +74,7 @@ void ompl::geometric::SMR::setup()
         nn_->setDistanceFunction([this](const Vertex a, const Vertex b) { return distanceFunction(a, b); });
     }
     if (!connectionStrategy_)
-        setDefaultConnectionStrategy();
+        connectionStrategy_ = KStrategy<Vertex>(magic::DEFAULT_NEAREST_NEIGHBORS, nn_);
     if (!connectionFilter_)
         connectionFilter_ = [](const Vertex &, const Vertex &) { return true; };
 
@@ -151,8 +90,7 @@ void ompl::geometric::SMR::setup()
         else
         {
             opt_ = std::make_shared<base::PathLengthOptimizationObjective>(si_);
-            if (!starStrategy_)
-                opt_->setCostThreshold(opt_->infiniteCost());
+            opt_->setCostThreshold(opt_->infiniteCost());
         }
     }
     else
@@ -162,10 +100,8 @@ void ompl::geometric::SMR::setup()
     }
 }
 
-void ompl::geometric::SMR::setMaxNearestNeighbors(unsigned int k)
+void ompl::control::SMR::setMaxNearestNeighbors(unsigned int k)
 {
-    if (starStrategy_)
-        throw Exception("Cannot set the maximum nearest neighbors for " + getName());
     if (!nn_)
     {
         specs_.multithreaded = false;  // temporarily set to false since nn_ is used only in single thread
@@ -179,34 +115,27 @@ void ompl::geometric::SMR::setMaxNearestNeighbors(unsigned int k)
         setup();
 }
 
-unsigned int ompl::geometric::SMR::getMaxNearestNeighbors() const
+unsigned int ompl::control::SMR::getMaxNearestNeighbors() const
 {
     const auto strategy = connectionStrategy_.target<KStrategy<Vertex>>();
     return strategy ? strategy->getNumNeighbors() : 0u;
 }
 
-void ompl::geometric::SMR::setDefaultConnectionStrategy()
-{
-    if (starStrategy_)
-        connectionStrategy_ = KStarStrategy<Vertex>([this] { return milestoneCount(); }, nn_, si_->getStateDimension());
-    else
-        connectionStrategy_ = KStrategy<Vertex>(magic::DEFAULT_NEAREST_NEIGHBORS, nn_);
-}
 
-void ompl::geometric::SMR::setProblemDefinition(const base::ProblemDefinitionPtr &pdef)
+void ompl::control::SMR::setProblemDefinition(const base::ProblemDefinitionPtr &pdef)
 {
     Planner::setProblemDefinition(pdef);
     clearQuery();
 }
 
-void ompl::geometric::SMR::clearQuery()
+void ompl::control::SMR::clearQuery()
 {
     startM_.clear();
     goalM_.clear();
     pis_.restart();
 }
 
-void ompl::geometric::SMR::clear()
+void ompl::control::SMR::clear()
 {
     Planner::clear();
     sampler_.reset();
@@ -220,19 +149,19 @@ void ompl::geometric::SMR::clear()
     bestCost_ = base::Cost(std::numeric_limits<double>::quiet_NaN());
 }
 
-void ompl::geometric::SMR::freeMemory()
+void ompl::control::SMR::freeMemory()
 {
     foreach (Vertex v, boost::vertices(g_))
         si_->freeState(stateProperty_[v]);
     g_.clear();
 }
 
-void ompl::geometric::SMR::expandRoadmap(double expandTime)
+void ompl::control::SMR::expandRoadmap(double expandTime)
 {
     expandRoadmap(base::timedPlannerTerminationCondition(expandTime));
 }
 
-void ompl::geometric::SMR::expandRoadmap(const base::PlannerTerminationCondition &ptc)
+void ompl::control::SMR::expandRoadmap(const base::PlannerTerminationCondition &ptc)
 {
     if (!simpleSampler_)
         simpleSampler_ = si_->allocStateSampler();
@@ -243,7 +172,7 @@ void ompl::geometric::SMR::expandRoadmap(const base::PlannerTerminationCondition
     si_->freeStates(states);
 }
 
-void ompl::geometric::SMR::expandRoadmap(const base::PlannerTerminationCondition &ptc,
+void ompl::control::SMR::expandRoadmap(const base::PlannerTerminationCondition &ptc,
                                          std::vector<base::State *> &workStates)
 {
     // construct a probability distribution over the vertices in the roadmap
@@ -308,12 +237,12 @@ void ompl::geometric::SMR::expandRoadmap(const base::PlannerTerminationCondition
     }
 }
 
-void ompl::geometric::SMR::growRoadmap(double growTime)
+void ompl::control::SMR::growRoadmap(double growTime)
 {
     growRoadmap(base::timedPlannerTerminationCondition(growTime));
 }
 
-void ompl::geometric::SMR::growRoadmap(const base::PlannerTerminationCondition &ptc)
+void ompl::control::SMR::growRoadmap(const base::PlannerTerminationCondition &ptc)
 {
     if (!isSetup())
         setup();
@@ -325,7 +254,7 @@ void ompl::geometric::SMR::growRoadmap(const base::PlannerTerminationCondition &
     si_->freeState(workState);
 }
 
-void ompl::geometric::SMR::growRoadmap(const base::PlannerTerminationCondition &ptc, base::State *workState)
+void ompl::control::SMR::growRoadmap(const base::PlannerTerminationCondition &ptc, base::State *workState)
 {
     /* grow roadmap in the regular fashion -- sample valid states, add them to the roadmap, add valid connections */
     while (!ptc)
@@ -348,7 +277,7 @@ void ompl::geometric::SMR::growRoadmap(const base::PlannerTerminationCondition &
     }
 }
 
-void ompl::geometric::SMR::checkForSolution(const base::PlannerTerminationCondition &ptc, base::PathPtr &solution)
+void ompl::control::SMR::checkForSolution(const base::PlannerTerminationCondition &ptc, base::PathPtr &solution)
 {
     auto *goal = static_cast<base::GoalSampleableRegion *>(pdef_->getGoal().get());
     while (!ptc && !addedNewSolution_)
@@ -369,7 +298,7 @@ void ompl::geometric::SMR::checkForSolution(const base::PlannerTerminationCondit
     }
 }
 
-bool ompl::geometric::SMR::maybeConstructSolution(const std::vector<Vertex> &starts, const std::vector<Vertex> &goals,
+bool ompl::control::SMR::maybeConstructSolution(const std::vector<Vertex> &starts, const std::vector<Vertex> &goals,
                                                   base::PathPtr &solution)
 {
     base::Goal *g = pdef_->getGoal().get();
@@ -410,12 +339,12 @@ bool ompl::geometric::SMR::maybeConstructSolution(const std::vector<Vertex> &sta
     return false;
 }
 
-bool ompl::geometric::SMR::addedNewSolution() const
+bool ompl::control::SMR::addedNewSolution() const
 {
     return addedNewSolution_;
 }
 
-ompl::base::PlannerStatus ompl::geometric::SMR::solve(const base::PlannerTerminationCondition &ptc)
+ompl::base::PlannerStatus ompl::control::SMR::solve(const base::PlannerTerminationCondition &ptc)
 {
     checkValidity();
     auto *goal = dynamic_cast<base::GoalSampleableRegion *>(pdef_->getGoal().get());
@@ -499,7 +428,70 @@ ompl::base::PlannerStatus ompl::geometric::SMR::solve(const base::PlannerTermina
     return sol ? base::PlannerStatus::EXACT_SOLUTION : base::PlannerStatus::TIMEOUT;
 }
 
-void ompl::geometric::SMR::constructRoadmap(const base::PlannerTerminationCondition &ptc)
+void ompl::control::SMR::getTransitions(const std::vector<Vertex> &vertices, const Vertex s, const int u, std::map<Vertex*, double> &transitions)
+{
+    transitions.clear();
+    ompl::base::State* qState;
+    si_->allocState(qState);
+
+    double delta_0 = 0.5;
+    double r_0 = 2.5;
+    double sigma_delta_0 = 0.1;
+    double sigma_delta_1 = 0.2;
+    double sigma_r_0 = 0.5;
+    double sigma_r_1 = 1.0;
+    auto xState = stateProperty_[s]->as<ompl::base::SE2StateSpace::StateType>();
+    auto tState 
+    for (int i = 0; i < m_; i++) 
+    {
+        // Generate sample transitions for needle
+        // Sample distance delta and radius r from Gaussian distributions
+        double delta = 0.0;
+        double r = 0.0;
+        if (u == 0) {
+            delta = rng_.gaussian(delta_0, sigma_delta_0);
+            r = rng_.gaussian(r_0, sigma_r_0);
+        } else {
+            delta = rng_.gaussian(delta_0, sigma_delta_1);
+            r = rng_.gaussian(r_0, sigma_r_1);
+        }
+
+        // Calculate new sample state q
+        double theta = xState->getYaw();
+        int sign = (u == 0) ? 1 : -1;
+        double theta_new = theta + sign * delta / r;
+        double x_new = xState->getX() - sign * r * std::sin(theta) + sign * r * std::sin(theta_new); 
+        double y_new = yState->getY() + sign * r * std::cos(theta) - sign * r * std::cos(theta_new);
+    
+        qState->as<ompl::base::SE2StateSpace::StateType>()->setX(x_new);
+        qState->as<ompl::base::SE2StateSpace::StateType>()->setY(y_new);
+        qState->as<ompl::base::SE2StateSpace::StateType>()->setYaw(theta_new);
+
+        // Check if the path from x to q is valid
+        bool valid = si_->checkMotion(xState, qState);
+        std::lock_guard<std::mutex> _(graphMutex_);
+        Vertex t = boost::add_vertex(g_);
+        if (valid) {
+            // TODO: Find Vertex t that minimizes dist(q, t) and save its state to tState
+            // Use Nearest Neighbors
+        } else {
+            // TODO: Set Vertex t to obstacle state
+        }
+        
+        // Find if transitions already contains Vertex t
+        if (transitions.contains(*t)) {
+            // Update probability of transitions from Vertex t
+            transitions[*t] = transitions[*t] + 1.0/m_;
+        } else {
+            // Initialize probability of transitions from Vertex t
+            transitions[*t] = 1.0/m_;
+        }
+    }
+
+    return transitionProb;
+}
+
+void ompl::control::SMR::constructRoadmap(const base::PlannerTerminationCondition &ptc)
 {
     if (!isSetup())
         setup();
@@ -508,30 +500,52 @@ void ompl::geometric::SMR::constructRoadmap(const base::PlannerTerminationCondit
     if (!simpleSampler_)
         simpleSampler_ = si_->allocStateSampler();
 
-    std::vector<base::State *> xstates(magic::MAX_RANDOM_BOUNCE_STEPS);
-    si_->allocStates(xstates);
-    bool grow = true;
-
-    bestCost_ = opt_->infiniteCost();
-    while (!ptc())
+    // SMR Learning phase
+    base::State *qState = si_->allocState();
+    while (milestoneCount() < n_) 
     {
-        // maintain a 2:1 ratio for growing/expansion of roadmap
-        // call growRoadmap() twice as long for every call of expandRoadmap()
-        if (grow)
-            growRoadmap(base::plannerOrTerminationCondition(
-                            ptc, base::timedPlannerTerminationCondition(2.0 * magic::ROADMAP_BUILD_TIME)),
-                        xstates[0]);
-        else
-            expandRoadmap(base::plannerOrTerminationCondition(
-                              ptc, base::timedPlannerTerminationCondition(magic::ROADMAP_BUILD_TIME)),
-                          xstates);
-        grow = !grow;
-    }
+        iterations_++;
+        bool found = false;
+        while (!found) 
+        {
+            unsigned int attempts = 0;
+            do
+            {
+                found = sampler_->sample(qState);
+                attempts++;
+            } while (attempts < magic::FIND_VALID_STATE_ATTEMPTS_WITHOUT_TERMINATION_CHECK && !found);
+        }
+        if (found) {
+            std::lock_guard<std::mutex> _(graphMutex_);
 
-    si_->freeStates(xstates);
+            Vertex m = boost::add_vertex(g_);
+            stateProperty_[m] = si_->cloneState(qState);
+            totalConnectionAttemptsProperty_[m] = 1;
+            successfulConnectionAttemptsProperty_[m] = 0;
+            nn_->add(m);
+        }
+    }
+    si_->freeState(qState);
+
+    const std::vector<Vertex> &vertices = new std::vector<>();
+    nn_->list(vertices);
+    const int upperBound = siC_->getControlSpace()->as<ompl::control::DiscreteControlSpace>()->getUpperBound();
+    const int lowerBound = siC_->getControlSpace()->as<ompl::control::DiscreteControlSpace>()->getLowerBound();
+
+    std::map<Vertex*, double> transitions;
+    foreach (Vertex s, vertices)
+        for (int u = lowerBound; u <= upperBound; u++) {
+            getTransitions(vertices, s, u, transitions);
+            for (const auto &[t, p] : transitions) {
+                // TODO: Add (s, t, p) to the set of edges
+            }
+        }
+
+    // SMR Query phase
+    // TODO: Implement Markov decision process to find optimal policy
 }
 
-ompl::geometric::SMR::Vertex ompl::geometric::SMR::addMilestone(base::State *state)
+ompl::control::SMR::Vertex ompl::control::SMR::addMilestone(base::State *state)
 {
     std::lock_guard<std::mutex> _(graphMutex_);
 
@@ -562,22 +576,23 @@ ompl::geometric::SMR::Vertex ompl::geometric::SMR::addMilestone(base::State *sta
             }
         }
 
+
     nn_->add(m);
 
     return m;
 }
 
-void ompl::geometric::SMR::uniteComponents(Vertex m1, Vertex m2)
+void ompl::control::SMR::uniteComponents(Vertex m1, Vertex m2)
 {
     disjointSets_.union_set(m1, m2);
 }
 
-bool ompl::geometric::SMR::sameComponent(Vertex m1, Vertex m2)
+bool ompl::control::SMR::sameComponent(Vertex m1, Vertex m2)
 {
     return boost::same_component(m1, m2, disjointSets_);
 }
 
-ompl::base::Cost ompl::geometric::SMR::constructApproximateSolution(const std::vector<Vertex> &starts,
+ompl::base::Cost ompl::control::SMR::constructApproximateSolution(const std::vector<Vertex> &starts,
                                                                     const std::vector<Vertex> &goals,
                                                                     base::PathPtr &solution)
 {
@@ -657,7 +672,7 @@ ompl::base::Cost ompl::geometric::SMR::constructApproximateSolution(const std::v
     return closestVal;
 }
 
-ompl::base::PathPtr ompl::geometric::SMR::constructSolution(const Vertex &start, const Vertex &goal)
+ompl::base::PathPtr ompl::control::SMR::constructSolution(const Vertex &start, const Vertex &goal)
 {
     std::lock_guard<std::mutex> _(graphMutex_);
     boost::vector_property_map<Vertex> prev(boost::num_vertices(g_));
@@ -690,7 +705,7 @@ ompl::base::PathPtr ompl::geometric::SMR::constructSolution(const Vertex &start,
     return p;
 }
 
-void ompl::geometric::SMR::getPlannerData(base::PlannerData &data) const
+void ompl::control::SMR::getPlannerData(base::PlannerData &data) const
 {
     Planner::getPlannerData(data);
 
@@ -719,7 +734,7 @@ void ompl::geometric::SMR::getPlannerData(base::PlannerData &data) const
     }
 }
 
-ompl::base::Cost ompl::geometric::SMR::costHeuristic(Vertex u, Vertex v) const
+ompl::base::Cost ompl::control::SMR::costHeuristic(Vertex u, Vertex v) const
 {
     return opt_->motionCostHeuristic(stateProperty_[u], stateProperty_[v]);
 }

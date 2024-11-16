@@ -1,5 +1,5 @@
-#ifndef OMPL_GEOMETRIC_PLANNERS_SMR_SMR_
-#define OMPL_GEOMETRIC_PLANNERS_SMR_SMR_
+#ifndef OMPL_CONTROL_PLANNERS_SMR_SMR_
+#define OMPL_CONTROL_PLANNERS_SMR_SMR_
 
 #include "ompl/geometric/planners/PlannerIncludes.h"
 #include "ompl/datastructures/NearestNeighbors.h"
@@ -19,7 +19,7 @@ namespace ompl
         OMPL_CLASS_FORWARD(OptimizationObjective);
     }
 
-    namespace geometric
+    namespace control
     {
         /** \brief Stochastic Motion Roadmap planner */
         class SMR : public base::Planner
@@ -86,10 +86,7 @@ namespace ompl
             using ConnectionFilter = std::function<bool(const Vertex &, const Vertex &)>;
 
             /** \brief Constructor */
-            SMR(const base::SpaceInformationPtr &si, bool starStrategy = false);
-
-            /** \brief Constructor */
-            SMR(const base::PlannerData &data, bool starStrategy = false);
+            SMR(const base::SpaceInformationPtr &si);
 
             ~SMR() override;
 
@@ -113,8 +110,6 @@ namespace ompl
                 connectionStrategy_ = connectionStrategy;
                 userSetConnectionStrategy_ = true;
             }
-            /** Set default strategy for connecting to nearest neighbors */
-            void setDefaultConnectionStrategy();
 
             /** \brief Convenience function that sets the connection strategy to the
              default one with k nearest neighbors.
@@ -234,6 +229,7 @@ namespace ompl
                 return nn_;
             }
 
+
         protected:
             /** \brief Free all the memory allocated by the planner */
             void freeMemory();
@@ -311,8 +307,9 @@ namespace ompl
                 return std::to_string(edgeCount());
             }
 
-            /** \brief Flag indicating whether the default connection strategy is the Star strategy */
-            bool starStrategy_;
+            /** \brief Estimates state transition probabilities according to SMR algorithm */
+            void getTransitions(const std::vector<Vertex> &vertices, const Vertex s, const int u, std::map<Vertex*, double> &transitions);
+
 
             /** \brief Sampler user for generating valid samples in the state space */
             base::ValidStateSamplerPtr sampler_;
@@ -377,6 +374,14 @@ namespace ompl
             unsigned long int iterations_{0};
             /** \brief Best cost found so far by algorithm */
             base::Cost bestCost_{std::numeric_limits<double>::quiet_NaN()};
+
+            const SpaceInformation *siC_;
+
+            const int n_{50000};
+
+            const int t_{1};
+
+            const int m_{10};
         };
     }
 }
