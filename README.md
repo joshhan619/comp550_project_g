@@ -1,5 +1,5 @@
 ** TODO **
 
 ProjectG.cpp
-1. querySMR: run a Markov decision process using the SMR to find conditional probabilities.
+1. isCollisionFreePath needs to be fixed
 2. isCollisionFree + environment setup
