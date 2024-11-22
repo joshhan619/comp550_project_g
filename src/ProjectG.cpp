@@ -118,16 +118,18 @@ void getTransitions(std::vector<ob::State *> &V, const ob::State *s, const int u
     si->freeState(q);
 }
 
-std::unordered_map<int, Graph> buildSMR(ob::SpaceInformationPtr si, int n, const std::vector<int> &U, int m, ob::State *OBS_STATE) {
+std::unordered_map<int, Graph> buildSMR(ob::SpaceInformationPtr si, ob::State *start, ob::State *goal, int n, const std::vector<int> &U, int m, ob::State *OBS_STATE) {
     std::unordered_map<int, Graph> SMR; // Map of graphs for each action u
 
     // Initialize vertices set
     std::vector<ob::State *> V;
+    V.push_back(start);
+    V.push_back(goal);
 
     // Sample n collision free states
     ob::State *q = si->allocState();
     auto sampler = si->allocStateSampler();
-    while (V.size() < static_cast<size_t>(n)) {
+    while (V.size() < static_cast<size_t>(n+2)) {
         sampler->sampleUniform(q);
         if (si->isValid(q)) {
             V.push_back(si->cloneState(q));
@@ -151,7 +153,6 @@ std::unordered_map<int, Graph> buildSMR(ob::SpaceInformationPtr si, int n, const
 
         SMR[u] = graph;
     }
-
 
     return SMR;
 }
@@ -240,6 +241,18 @@ int main() {
     auto si = std::make_shared<ob::SpaceInformation>(space);
     si->setStateValidityChecker([](const ob::State *state) { return isCollisionFree(state); });
 
+    // Create start and goal positions
+    ob::State *start = si->allocState();
+    ob::State *goal = si->allocState();
+
+    start->as<ob::SE2StateSpace::StateType>()->setX(0.0);
+    start->as<ob::SE2StateSpace::StateType>()->setY(0.0);
+    start->as<ob::SE2StateSpace::StateType>()->setYaw(0.0);
+
+    goal->as<ob::SE2StateSpace::StateType>()->setX(0.5);
+    goal->as<ob::SE2StateSpace::StateType>()->setY(0.5);
+    goal->as<ob::SE2StateSpace::StateType>()->setYaw(0.0);
+
     // Define actions
     std::vector<int> U = {0, 1}; // 0 means turn left, 1 means turn right
 
@@ -249,7 +262,7 @@ int main() {
 
     // Build SMR
     ob::State *OBS_STATE = si->allocState();
-    std::unordered_map<int, Graph> smr = buildSMR(si, n, U, m, OBS_STATE);
+    std::unordered_map<int, Graph> smr = buildSMR(si, start, goal, n, U, m, OBS_STATE);
 
     // Output results
     for (const auto roadmap : smr) {
@@ -264,11 +277,7 @@ int main() {
         }
     }
 
-    ob::State *goal = si->allocState();
-    goal->as<ob::SE2StateSpace::StateType>()->setX(0.5);
-    goal->as<ob::SE2StateSpace::StateType>()->setY(0.5);
-    goal->as<ob::SE2StateSpace::StateType>()->setYaw(0.0);
-
+    // Query SMR using value iteration
     std::unordered_map<ob::State *, int> best_actions = querySMR(smr, goal, 0.1);
 
     for (const auto pair : best_actions) {
@@ -285,10 +294,6 @@ int main() {
 
     if (OBS_STATE) {
         si->freeState(OBS_STATE);
-    }
-
-    if (goal) {
-        si->freeState(goal);
     }
 
     return 0;
