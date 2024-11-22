@@ -29,44 +29,35 @@ bool isCollisionFree(const ob::State *state) {
     return true;
 }
 
-void applyControlInput(const ob::SE2StateSpace::StateType *start, ob::SE2StateSpace::StateType *result, double t, int u) {
-    double x = start->getX();
-    double y = start->getY();
-    double theta = start->getYaw();
+void propagateCircularArc(const ob::State *s, const int u, const double r, const double delta, ob::State *q) {
+    auto sState = s->as<ob::SE2StateSpace::StateType>();
+    double theta = sState->getYaw();
+    int sign = (u == 0) ? 1 : -1;
+    double theta_new = theta + sign * delta / r;
+    double x_new = sState->getX() - sign * r * std::sin(theta) + sign * r * std::sin(theta_new); 
+    double y_new = sState->getY() + sign * r * std::cos(theta) - sign * r * std::cos(theta_new);
 
-    // Adjust turning angle based on control input
-    double turnAngle = (u == 0) ? -M_PI_4 : M_PI_4; // Turn left or right by 45 degrees
-    double adjustedTheta = theta + t * turnAngle;
-
-    // Generate the new state
-    result->setX(x + t * std::cos(adjustedTheta)); // Move forward with rotation
-    result->setY(y + t * std::sin(adjustedTheta));
-    result->setYaw(adjustedTheta);
+    q->as<ob::SE2StateSpace::StateType>()->setX(x_new);
+    q->as<ob::SE2StateSpace::StateType>()->setY(y_new);
+    q->as<ob::SE2StateSpace::StateType>()->setYaw(theta_new);
 }
 
-bool isCollisionFreePath(const ob::State *s1, const ob::State *s2, const int u, ob::SpaceInformationPtr si)
+bool isCollisionFreePath(const ob::State *s1, const ob::State *s2, const int u, const double r, const double delta, ob::SpaceInformationPtr si)
 {
     const double stepSize = si->getStateSpace()->getMaximumExtent() / 100.0;
     int numSteps = static_cast<int>(si->distance(s1, s2) / stepSize);
 
-    auto *intermediateState = si->allocState();
-    const auto *start = s1->as<ob::SE2StateSpace::StateType>();
+    ob::State *q = si->allocState();
+    for (int i = 1; i <= numSteps; i++) {
+        propagateCircularArc(s1, u, r, i*delta/numSteps, q);
 
-    for (int i = 0; i <= numSteps; ++i) {
-        double t = static_cast<double>(i) / numSteps;
-
-        // Apply control input to generate intermediate states
-        auto *intermediate = intermediateState->as<ob::SE2StateSpace::StateType>();
-        applyControlInput(start, intermediate, t, u);
-
-        // Check if the intermediate state is collision-free
-        if (!si->isValid(intermediateState)) {
-            si->freeState(intermediateState);
+        if (!si->isValid(q)) {
+            si->freeState(q);
             return false;
         }
     }
 
-    si->freeState(intermediateState);
+    si->freeState(q);
     return true;
 }
 
@@ -82,7 +73,6 @@ void getTransitions(std::vector<ob::State *> &V, const ob::State *s, const int u
     double sigma_delta_1 = 0.2;
     double sigma_r_0 = 0.5;
     double sigma_r_1 = 1.0;
-    auto sState = s->as<ob::SE2StateSpace::StateType>();
     for (int i = 0; i < m; i++) 
     {
         // Generate sample transitions for needle
@@ -98,18 +88,10 @@ void getTransitions(std::vector<ob::State *> &V, const ob::State *s, const int u
         }
 
         // Calculate new sample state q
-        double theta = sState->getYaw();
-        int sign = (u == 0) ? 1 : -1;
-        double theta_new = theta + sign * delta / r;
-        double x_new = sState->getX() - sign * r * std::sin(theta) + sign * r * std::sin(theta_new); 
-        double y_new = sState->getY() + sign * r * std::cos(theta) - sign * r * std::cos(theta_new);
-    
-        q->as<ob::SE2StateSpace::StateType>()->setX(x_new);
-        q->as<ob::SE2StateSpace::StateType>()->setY(y_new);
-        q->as<ob::SE2StateSpace::StateType>()->setYaw(theta_new);
+        propagateCircularArc(s, u, r, delta, q);
         
         ob::State *t = nullptr;
-        if (isCollisionFreePath(s, q, u, si)) {
+        if (isCollisionFreePath(s, q, u, r, delta, si)) {
             // Find Vertex t that minimizes dist(q, t)
             double minDistance = std::numeric_limits<double>::infinity();
             for (ob::State *v : V) {
