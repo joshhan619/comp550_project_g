@@ -417,9 +417,6 @@ int main() {
     // }
 
 
-        }
-    }   
-    */
     // Query SMR using value iteration
     std::unordered_map<ob::State *, int> best_actions;
     std::unordered_map<ob::State *, double> values;
