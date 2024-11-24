@@ -9,6 +9,7 @@
 #include <iostream>
 #include <math.h>
 #include <tuple>
+#include <fstream>
 
 namespace ob = ompl::base;
 
@@ -35,10 +36,16 @@ struct Graph {
     std::vector<Edge> edges;
 };
 
-// TODO: Implement isCollisionFree with obstacles
 bool isCollisionFree(const ob::State *state) {
     double x = state->as<ob::SE2StateSpace::StateType>()->getX();
     double y = state->as<ob::SE2StateSpace::StateType>()->getY();
+
+    // Check for going out of bounds
+    if (x < -0.5 || x > 0.5 || y < -0.5 || y > 0.5) {
+        return false;
+    }
+
+    // Check for obstacle collisions
     for(size_t i = 0; i < obstacles.size(); ++i)
     {
         if (x >= obstacles[i].x && x <= obstacles[i].x + obstacles[i].width)
@@ -211,13 +218,14 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
     // Initialize data structure to hold the best actions for each state
     std::unordered_map<ob::State *, int> best_actions;
     
-    int max_iterations = 10000;
+    int max_iterations = states.size();
     bool stop = false;
     std::unordered_map<ob::State *, double> new_values;
     int iter = 0;
+    double threshold = 1e-7;
     while (!stop && iter < max_iterations) {
-        stop = true;
         iter++;
+        double max_change_in_value = 0;
         for (const auto &state : states) {
             double reward = 0;
             if (isGoalReachable(state, goal, radius)) {
@@ -249,12 +257,15 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
             }
             new_values[state] = reward + maxExpectedValue;
 
-            // Stop if the change between the old and new value for every value is below threshhold
-            if (new_values[state] - values[state] >= 0.1) {
-                stop = false;
+            if (new_values[state] - values[state] > max_change_in_value) {
+                max_change_in_value = new_values[state] - values[state];
             }
         }
         values = new_values;
+        // Stop if the max change between the old and new value for every state is below threshold
+        if (max_change_in_value < threshold) {
+            break;
+        }
     }
 
     if (iter == max_iterations) {
@@ -264,7 +275,7 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
     // Return the optimal policy, which is the best action at each state
     return std::make_tuple(best_actions, values);
 }
-void makeEnviroment(std::vector<Rectangle> &  obstacles )
+void makeEnvironment(std::vector<Rectangle> &  obstacles )
 {
     
     // TODO: Fill in the vector of rectangles with your street environment.
@@ -281,22 +292,20 @@ void makeEnviroment(std::vector<Rectangle> &  obstacles )
     obs2.width=1;
     obs2.height=.05;
     obstacles.push_back(obs2);
-     
-    Rectangle obs3;
-    obs3.x =-.5;
-    obs3.y=-.35;
-    obs3.width=.4;
-    obs3.height=.7;
-    obstacles.push_back(obs3);
     
-    Rectangle obs4;
-    obs4.x =.2;
-    obs4.y=-.35;
-    obs4.width=.4;
-    obs4.height=.7;
-    obstacles.push_back(obs4);
+    // Rectangle obs3;
+    // obs3.x =-.5;
+    // obs3.y=-.35;
+    // obs3.width=.4;
+    // obs3.height=.7;
+    // obstacles.push_back(obs3);
     
-
+    // Rectangle obs4;
+    // obs4.x =.2;
+    // obs4.y=-.35;
+    // obs4.width=.4;
+    // obs4.height=.7;
+    // obstacles.push_back(obs4);
 }
 std::vector<ob::State *> extractPathFromPolicy(
     ob::SpaceInformationPtr si, 
@@ -382,7 +391,7 @@ int main() {
 
     // Create environment
     obstacles.clear();
-    makeEnviroment(obstacles);
+    makeEnvironment(obstacles);
 
     // Define actions
     std::vector<int> U = {0, 1}; // 0 means turn left, 1 means turn right
@@ -450,38 +459,49 @@ int main() {
     }
 
     // Experiment 2: Test SMR's sensitivity to sample size n
-    // int sample_size[4] = {100000, 10000, 100000, 1000000};
-    // double sample_means[4];
-    // double sample_sd[4];
-    // for (int i = 0; i < 4; i++) {
-    //     int n = sample_size[i];
-    //     double sample_diff[20];
-    //     for (int j = 0; j < 20; j++) {
-    //         std::unordered_map<int, Graph> smr = buildSMR(si, start, goal, n, U, m, OBS_STATE);
-    //         std::unordered_map<ob::State *, int> best_actions;
-    //         std::unordered_map<ob::State *, double> values;
-    //         tie(best_actions, values) = querySMR(smr, goal, OBS_STATE, 0.1);
-    //         int successCount = 0;
-    //         for (int k = 0; k < 1000; k++) {
-    //             std::vector<ob::State *> path = extractPathFromPolicy(si, start, goal, best_actions, smr);
-    //             if (!path.empty() && path.back() == goal) {
-    //                 // This path reached the goal
-    //                 successCount++;
-    //             }
-    //         }
-    //         double actualProb = successCount / 1000.0;
-    //         std::cout << "n = " << n << ". Actual probability is " << actualProb << ". Expected probability is " << values[start] << std::endl;
-    //         sample_diff[j] = actualProb - values[start];
-    //         sample_means[i] += sample_diff[j];
-    //     }
-    //     sample_means[i] /= 20.0;
-    //     for (int j = 0; j < 20; j++) {
-    //         sample_sd[i] += pow(sample_diff[j] - sample_means[i], 2);
-    //     }
-    //     sample_sd[i] = sqrt(sample_sd[i] / 20.0);
-    //     std::cout << "Mean = " << sample_means[i] << " and sd = " << sample_sd[i] << " for n = " << n << std::endl;
+    int sample_size[4] = {1000, 10000, 100, 100};
+    double sample_means[4];
+    double sample_sd[4];
+    for (int i = 0; i < 4; i++) {
+        int n = sample_size[i];
+        double sample_diff[20];
+        for (int j = 0; j < 20; j++) {
+            std::unordered_map<int, Graph> smr = buildSMR(si, start, goal, n, U, m, OBS_STATE);
+            std::unordered_map<ob::State *, int> best_actions;
+            std::unordered_map<ob::State *, double> values;
+            tie(best_actions, values) = querySMR(smr, goal, OBS_STATE, 0.1);
+            std::cout << "SMR queried" << std::endl;
+            int successCount = 0;
+            for (int k = 0; k < 1000; k++) {
+                std::vector<ob::State *> path = extractPathFromPolicy(si, start, goal, best_actions, smr);
+                if (!path.empty() && path.back() == goal) {
+                    // This path reached the goal
+                    successCount++;
+                }
+            }
+            double actualProb = successCount / 1000.0;
+            std::cout << "n = " << n << ". Actual probability is " << actualProb << ". Expected probability is " << values[start] << std::endl;
+            sample_diff[j] = actualProb - values[start];
+            sample_means[i] += sample_diff[j];
+        }
+        sample_means[i] /= 20.0;
+        for (int j = 0; j < 20; j++) {
+            sample_sd[i] += pow(sample_diff[j] - sample_means[i], 2);
+        }
+        sample_sd[i] = sqrt(sample_sd[i] / 20.0);
+        std::cout << "Mean = " << sample_means[i] << " and sd = " << sample_sd[i] << " for n = " << n << std::endl;
+    }
 
-    // }
+    // Save means and standard deviations to output file
+    std::ofstream outputFile("output.txt");
+    if (outputFile.is_open()) {
+        for (int i = 0; i < 4; i++) {
+            outputFile << sample_size[i] << "," << sample_means[i] << "," << sample_sd[i] << std::endl;
+        }
+        outputFile.close();
+        std::cout << "Means and standard deviations of experiment 2 written to output.txt" << std::endl;
+    }
+    
 
     // Free memory in roadmap
     for (auto *v: smr.at(0).vertices) {
