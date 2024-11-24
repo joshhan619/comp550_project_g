@@ -382,6 +382,8 @@ namespace ompl
             const int t_{1};
 
             const int m_{10};
+
+            const base::State *obsState_{nullptr};
         };
     }
 }

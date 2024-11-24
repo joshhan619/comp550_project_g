@@ -98,6 +98,9 @@ void ompl::control::SMR::setup()
         OMPL_INFORM("%s: problem definition is not set, deferring setup completion...", getName().c_str());
         setup_ = false;
     }
+
+    // Initialize obstacle state
+    si_->allocState(obsState_);
 }
 
 void ompl::control::SMR::setMaxNearestNeighbors(unsigned int k)
@@ -470,10 +473,13 @@ void ompl::control::SMR::getTransitions(const std::vector<Vertex> &vertices, con
         // Check if the path from x to q is valid
         bool valid = si_->checkMotion(xState, qState);
         std::lock_guard<std::mutex> _(graphMutex_);
-        Vertex t = boost::add_vertex(g_);
+        Vertex t;
+        Vertex q = boost::add_vertex(g_);
+        stateProperty_[q] = si_->cloneState(qState);
         if (valid) {
-            // TODO: Find Vertex t that minimizes dist(q, t) and save its state to tState
+            // TODO: Find Vertex t that minimizes dist(q, t)
             // Use Nearest Neighbors
+            t = nn_->nearest(q);
         } else {
             // TODO: Set Vertex t to obstacle state
         }
@@ -520,8 +526,6 @@ void ompl::control::SMR::constructRoadmap(const base::PlannerTerminationConditio
 
             Vertex m = boost::add_vertex(g_);
             stateProperty_[m] = si_->cloneState(qState);
-            totalConnectionAttemptsProperty_[m] = 1;
-            successfulConnectionAttemptsProperty_[m] = 0;
             nn_->add(m);
         }
     }
