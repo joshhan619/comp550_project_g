@@ -167,7 +167,7 @@ bool isGoalReachable(ob::State *q, ob::State *goal, double radius) {
     return pow(qX-goalX, 2) + pow(qY-goalY, 2) <= pow(radius, 2);
 }
 
-std::unordered_map<ob::State *, int> querySMR(std::unordered_map<int, Graph> SMR, ob::State *goal, double radius) {
+std::unordered_map<ob::State *, int> querySMR(std::unordered_map<int, Graph> SMR, ob::State *goal, ob::State *OBS_STATE, double radius) {
     // Build transition probability matrix
     std::unordered_map<int, std::map<const ob::State *, std::map<const ob::State *, double>>> prob;
      
@@ -201,6 +201,13 @@ std::unordered_map<ob::State *, int> querySMR(std::unordered_map<int, Graph> SMR
             if (isGoalReachable(state, goal, radius)) {
                 reward = 1;
             }
+
+            // It is assumed that when the robot reaches a goal or obstacle state, it stops
+            if (state == goal || state == OBS_STATE) {
+                new_values[state] = reward;
+                continue;
+            }
+
             double maxExpectedValue = 0;
             for (const auto roadmap: SMR) {
                 int u = roadmap.first;
@@ -278,7 +285,7 @@ int main() {
     }
 
     // Query SMR using value iteration
-    std::unordered_map<ob::State *, int> best_actions = querySMR(smr, goal, 0.1);
+    std::unordered_map<ob::State *, int> best_actions = querySMR(smr, goal, OBS_STATE, 0.1);
 
     for (const auto pair : best_actions) {
         auto se2state = pair.first->as<ob::SE2StateSpace::StateType>();
