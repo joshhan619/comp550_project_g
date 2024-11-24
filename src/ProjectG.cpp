@@ -25,8 +25,8 @@ struct Rectangle
 };
 std::vector<Rectangle> obstacles;
 struct Edge {
-    const ob::State *source;
-    const ob::State *target;
+    ob::State *source;
+    ob::State *target;
     double prob;
 };
 
@@ -165,7 +165,7 @@ std::unordered_map<int, Graph> buildSMR(ob::SpaceInformationPtr si, ob::State *s
         std::map<ob::State *, double> transitions;
         for (ob::State *s : V) {
             getTransitions(V, s, u, si, m, OBS_STATE, transitions);
-            for (const auto &transition : transitions) {
+            for (auto &transition : transitions) {
                 graph.edges.push_back({s, transition.first, transition.second});
             }
         }
@@ -188,12 +188,12 @@ bool isGoalReachable(ob::State *q, ob::State *goal, double radius) {
 
 std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *, double>> querySMR(std::unordered_map<int, Graph> SMR, ob::State *goal, ob::State *OBS_STATE, double radius) {
     // Build transition probability matrix
-    std::unordered_map<int, std::map<const ob::State *, std::map<const ob::State *, double>>> prob;
+    std::unordered_map<int, std::map<ob::State *, std::map<ob::State *, double>>> prob;
      
     for (const auto roadmap: SMR) {
         int u = roadmap.first;
-        std::map<const ob::State *, std::map<const ob::State *, double>> matrix;
-        for (const auto edge : roadmap.second.edges) {
+        std::map<ob::State *, std::map<ob::State *, double>> matrix;
+        for (auto edge : roadmap.second.edges) {
             (matrix[edge.source])[edge.target] = edge.prob;
         }
         prob[u] = matrix;
@@ -211,16 +211,18 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
     // Initialize data structure to hold the best actions for each state
     std::unordered_map<ob::State *, int> best_actions;
     
+    int max_iterations = 10000;
     bool stop = false;
-    while (!stop) {
+    std::unordered_map<ob::State *, double> new_values;
+    int iter = 0;
+    while (!stop && iter < max_iterations) {
         stop = true;
-        std::unordered_map<ob::State *, double> new_values;
+        iter++;
         for (const auto &state : states) {
             double reward = 0;
             if (isGoalReachable(state, goal, radius)) {
                 reward = 1;
             }
-
             // It is assumed that when the robot reaches a goal or obstacle state, it stops
             if (state == goal || state == OBS_STATE) {
                 new_values[state] = reward;
@@ -231,9 +233,12 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
             for (const auto roadmap: SMR) {
                 int u = roadmap.first;
                 double exp_val = 0;
-                for (const auto &nxt : states) {
-                    if (nxt == state) continue;
-                    exp_val += prob[u][state][nxt]*values[nxt];
+                for (auto pair : prob[u][state]) {
+                    // pair.first accesses a state that stransitions from the current state
+                    // pair.second provides the probability from the current state to the next
+                    ob::State *next = pair.first;
+                    double probability = pair.second;
+                    exp_val += probability*values[next];
                 }
                 maxExpectedValue = std::max(maxExpectedValue, exp_val);
 
@@ -245,11 +250,15 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
             new_values[state] = reward + maxExpectedValue;
 
             // Stop if the change between the old and new value for every value is below threshhold
-            if (new_values[state] - values[state] >= 0.01) {
+            if (new_values[state] - values[state] >= 0.1) {
                 stop = false;
             }
         }
         values = new_values;
+    }
+
+    if (iter == max_iterations) {
+        std::cerr << "Warning: Value iteration reached max iterations before convergence" << std::endl;
     }
 
     // Return the optimal policy, which is the best action at each state
@@ -387,21 +396,26 @@ int main() {
     OBS_STATE->as<ob::SE2StateSpace::StateType>()->setX(9999);
     OBS_STATE->as<ob::SE2StateSpace::StateType>()->setY(9999);
     std::unordered_map<int, Graph> smr = buildSMR(si, start, goal, n, U, m, OBS_STATE);
-      
-    /*
+
+    std::cout << "SMR built" << std::endl;
+
     // Output results
-    for (const auto roadmap : smr) {
-        int u = roadmap.first;
-        Graph graph = roadmap.second;
-        for (const auto &e : graph.edges) {
-            auto source = e.source->as<ob::SE2StateSpace::StateType>();
-            auto target = e.target->as<ob::SE2StateSpace::StateType>();
-            std::string sStr = "(" + std::to_string(source->getX()) + ", " + std::to_string(source->getY()) + ")";
-            std::string tStr = "(" + std::to_string(target->getX()) + std::to_string(target->getY()) + ")";
-            std::cout << "Transition prob from " << sStr << " to " << tStr << " is " << e.prob << " with action u=" << u << std::endl;
-            if (e.target == goal) {
-                std::cout << "This path leads to the goal" << std::endl;
-            }
+    // for (const auto roadmap : smr) {
+    //     int u = roadmap.first;
+    //     Graph graph = roadmap.second;
+    //     for (const auto &e : graph.edges) {
+    //         auto source = e.source->as<ob::SE2StateSpace::StateType>();
+    //         auto target = e.target->as<ob::SE2StateSpace::StateType>();
+    //         std::string sStr = "(" + std::to_string(source->getX()) + ", " + std::to_string(source->getY()) + ")";
+    //         std::string tStr = "(" + std::to_string(target->getX()) + std::to_string(target->getY()) + ")";
+    //         std::cout << "Transition prob from " << sStr << " to " << tStr << " is " << e.prob << " with action u=" << u << std::endl;
+    //         if (e.target == goal) {
+    //             std::cout << "This path leads to the goal" << std::endl;
+    //         }
+
+    //     }
+    // }
+
 
         }
     }   
@@ -410,12 +424,14 @@ int main() {
     std::unordered_map<ob::State *, int> best_actions;
     std::unordered_map<ob::State *, double> values;
     tie(best_actions, values) = querySMR(smr, goal, OBS_STATE, 0.1);
-    /*
-    for (const auto pair : best_actions) {
-        auto se2state = pair.first->as<ob::SE2StateSpace::StateType>();
-        std::cout << "Best action for state (" << std::to_string(se2state->getX()) << ", " << std::to_string(se2state->getY()) << ") is u=" << pair.second << std::endl;
-    }
-    */
+
+    std::cout << "Optimal policy obtained" << std::endl;
+
+    // for (const auto pair : best_actions) {
+    //     auto se2state = pair.first->as<ob::SE2StateSpace::StateType>();
+    //     std::cout << "Best action for state (" << std::to_string(se2state->getX()) << ", " << std::to_string(se2state->getY()) << ") is u=" << pair.second << std::endl;
+    // }
+
     // Extract and print the path
     std::vector<ob::State *> path = extractPathFromPolicy(si, start, goal, best_actions, smr);
 
@@ -429,19 +445,45 @@ int main() {
     }
 
     for (const auto pair : values) {
+        if (pair.first != start) {
+            continue;
+        }
         auto se2state = pair.first->as<ob::SE2StateSpace::StateType>();
-        if (se2state->getX()==-0.5)
-            std::cout << "Probability for state (" << se2state->getX() << ", " << se2state->getY() << ") to reach goal: " << pair.second << std::endl;
+        std::cout << "Probability for state (" << se2state->getX() << ", " << se2state->getY() << ") to reach goal: " << pair.second << std::endl;
     }
-    
+
     // Experiment 2: Test SMR's sensitivity to sample size n
-    // int sample_size[4] = {1000, 10000, 100000, 1000000}; 
+    // int sample_size[4] = {100000, 10000, 100000, 1000000};
+    // double sample_means[4];
+    // double sample_sd[4];
     // for (int i = 0; i < 4; i++) {
     //     int n = sample_size[i];
-    //     std::unordered_map<int, Graph> smr = buildSMR(si, start, goal, n, U, m, OBS_STATE);
-    //     std::unordered_map<ob::State *, int> best_actions;
-    //     std::unordered_map<ob::State *, double> values;
-    //     tie(best_actions, values) = querySMR(smr, goal, OBS_STATE, 0.1);
+    //     double sample_diff[20];
+    //     for (int j = 0; j < 20; j++) {
+    //         std::unordered_map<int, Graph> smr = buildSMR(si, start, goal, n, U, m, OBS_STATE);
+    //         std::unordered_map<ob::State *, int> best_actions;
+    //         std::unordered_map<ob::State *, double> values;
+    //         tie(best_actions, values) = querySMR(smr, goal, OBS_STATE, 0.1);
+    //         int successCount = 0;
+    //         for (int k = 0; k < 1000; k++) {
+    //             std::vector<ob::State *> path = extractPathFromPolicy(si, start, goal, best_actions, smr);
+    //             if (!path.empty() && path.back() == goal) {
+    //                 // This path reached the goal
+    //                 successCount++;
+    //             }
+    //         }
+    //         double actualProb = successCount / 1000.0;
+    //         std::cout << "n = " << n << ". Actual probability is " << actualProb << ". Expected probability is " << values[start] << std::endl;
+    //         sample_diff[j] = actualProb - values[start];
+    //         sample_means[i] += sample_diff[j];
+    //     }
+    //     sample_means[i] /= 20.0;
+    //     for (int j = 0; j < 20; j++) {
+    //         sample_sd[i] += pow(sample_diff[j] - sample_means[i], 2);
+    //     }
+    //     sample_sd[i] = sqrt(sample_sd[i] / 20.0);
+    //     std::cout << "Mean = " << sample_means[i] << " and sd = " << sample_sd[i] << " for n = " << n << std::endl;
+
     // }
 
     // Free memory in roadmap
