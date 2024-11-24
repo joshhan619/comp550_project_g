@@ -256,55 +256,6 @@ std::unordered_map<ob::State *, int> querySMR(std::unordered_map<int, Graph> SMR
     // Return the optimal policy, which is the best action at each state
     return best_actions;
 }
-
-
-    // Initialize values
-    std::unordered_map<ob::State *, double> values;
-    std::vector<ob::State *> &states = SMR[0].vertices;
-    for (const auto &state : states) {
-        values[state] = 0;
-    }
-
-    // Initialize data structure to hold the best actions for each state
-    std::unordered_map<ob::State *, int> best_actions;
-    
-    bool stop = false;
-    while (!stop) {
-        stop = true;
-        std::unordered_map<ob::State *, double> new_values;
-        for (const auto &state : states) {
-            double reward = 0;
-            if (isGoalReachable(state, goal, radius)) {
-                reward = 1;
-            }
-            double maxExpectedValue = 0;
-            for (const auto roadmap: SMR) {
-                int u = roadmap.first;
-                double exp_val = 0;
-                for (const auto &nxt : states) {
-                    if (nxt == state) continue;
-                    exp_val += prob[u][state][nxt]*values[nxt];
-                }
-                maxExpectedValue = std::max(maxExpectedValue, exp_val);
-
-                // If better action is found, update best_actions
-                if (maxExpectedValue == exp_val) {
-                    best_actions[state] = u;
-                }
-            }
-            new_values[state] = reward + maxExpectedValue;
-
-            // Stop if the change between the old and new value for every value is below threshhold
-            if (new_values[state] - values[state] >= 0.01) {
-                stop = false;
-            }
-        }
-        values = new_values;
-    }
-
-    // Return the optimal policy, which is the best action at each state
-    return best_actions;
-}
 void makeEnviroment(std::vector<Rectangle> &  obstacles )
 {
     // TODO: Fill in the vector of rectangles with your street environment.
@@ -354,7 +305,7 @@ std::vector<ob::State *> extractPathFromPolicy(
         if (si->distance(current, goal) < 0.01) { // Adjust tolerance as needed
             break;
         }
-
+        
         // Get the best action for the current state
         if (best_actions.find(current) == best_actions.end()) {
             std::cerr << "Error: No action for current state! Path computation aborted." << std::endl;
@@ -416,14 +367,14 @@ int main() {
     std::vector<int> U = {0, 1}; // 0 means turn left, 1 means turn right
 
     // Parameters
-    int n = 100;  // Number of nodes
+    int n = 1000;  // Number of nodes
     int m = 10;   // Number of sample points per transition
 
     // Build SMR
     ob::State *OBS_STATE = si->allocState();
 
     std::unordered_map<int, Graph> smr = buildSMR(si, start, goal, n, U, m, OBS_STATE);
-
+      
 
     // Output results
     for (const auto roadmap : smr) {
@@ -442,7 +393,7 @@ int main() {
 
     // Query SMR using value iteration
 
-    std::unordered_map<ob::State *, int> best_actions = querySMR(smr, goal, 0.1);
+    std::unordered_map<ob::State *, int> best_actions = querySMR(smr, goal, OBS_STATE, 0.1);  
 
     for (const auto pair : best_actions) {
         auto se2state = pair.first->as<ob::SE2StateSpace::StateType>();
