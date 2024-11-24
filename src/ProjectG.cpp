@@ -419,15 +419,14 @@ int main() {
     }
 
     // Experiment 2: Test SMR's sensitivity to sample size n
-    int sample_size[4] = {1000, 10000, 100000, 1000000}; 
-    for (int i = 0; i < 4; i++) {
-        int n = sample_size[i];
-        std::unordered_map<int, Graph> smr = buildSMR(si, start, goal, n, U, m, OBS_STATE);
-        std::unordered_map<ob::State *, int> best_actions;
-        std::unordered_map<ob::State *, double> values;
-        tie(best_actions, values) = querySMR(smr, goal, OBS_STATE, 0.1);
-        
-    }
+    // int sample_size[4] = {1000, 10000, 100000, 1000000}; 
+    // for (int i = 0; i < 4; i++) {
+    //     int n = sample_size[i];
+    //     std::unordered_map<int, Graph> smr = buildSMR(si, start, goal, n, U, m, OBS_STATE);
+    //     std::unordered_map<ob::State *, int> best_actions;
+    //     std::unordered_map<ob::State *, double> values;
+    //     tie(best_actions, values) = querySMR(smr, goal, OBS_STATE, 0.1);
+    // }
 
     // Free memory in roadmap
     for (auto *v: smr.at(0).vertices) {
