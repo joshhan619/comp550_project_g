@@ -305,7 +305,7 @@ std::vector<ob::State *> extractPathFromPolicy(
         if (si->distance(current, goal) < 0.01) { // Adjust tolerance as needed
             break;
         }
-
+        
         // Get the best action for the current state
         if (best_actions.find(current) == best_actions.end()) {
             std::cerr << "Error: No action for current state! Path computation aborted." << std::endl;
@@ -367,7 +367,7 @@ int main() {
     std::vector<int> U = {0, 1}; // 0 means turn left, 1 means turn right
 
     // Parameters
-    int n = 100;  // Number of nodes
+    int n = 1000;  // Number of nodes
     int m = 10;   // Number of sample points per transition
 
     // Build SMR
@@ -394,7 +394,7 @@ int main() {
     // Query SMR using value iteration
 
     std::unordered_map<ob::State *, int> best_actions = querySMR(smr, goal, OBS_STATE, 0.1);  
-    
+
     for (const auto pair : best_actions) {
         auto se2state = pair.first->as<ob::SE2StateSpace::StateType>();
         std::cout << "Best action for state (" << std::to_string(se2state->getX()) << ", " << std::to_string(se2state->getY()) << ") is u=" << pair.second << std::endl;
