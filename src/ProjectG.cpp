@@ -266,6 +266,7 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
 }
 void makeEnviroment(std::vector<Rectangle> &  obstacles )
 {
+    
     // TODO: Fill in the vector of rectangles with your street environment.
     Rectangle obs1;
     obs1.x =-.5;
@@ -273,14 +274,14 @@ void makeEnviroment(std::vector<Rectangle> &  obstacles )
     obs1.width=1;
     obs1.height=.05;
     obstacles.push_back(obs1);
-
+   
     Rectangle obs2;
     obs2.x =-.5;
     obs2.y=.45;
     obs2.width=1;
     obs2.height=.05;
     obstacles.push_back(obs2);
-    
+     
     Rectangle obs3;
     obs3.x =-.5;
     obs3.y=-.35;
@@ -319,19 +320,31 @@ std::vector<ob::State *> extractPathFromPolicy(
             std::cerr << "Error: No action for current state! Path computation aborted." << std::endl;
             break;
         }
-
-        int action = best_actions[current];
-
-        // Find the next state by maximizing transition probability
-        double maxProb = -1;
+        // Policy1 choose random vertex but avoid obstcle state
         ob::State *next = nullptr;
-
+        int action = best_actions[current];
+         for (const auto &edge : SMR[action].edges) {
+            if (edge.source == current && edge.target->as<ob::SE2StateSpace::StateType>()->getY()!=9999) {
+                next = const_cast<ob::State *>(edge.target); // Remove const for assignment
+            }
+        }
+        /*
+        // Policy2 random choose next vertex
+        ompl::RNG rng; // Persistent RNG instance
+        rng.shuffle(SMR[action].edges.begin(), SMR[action].edges.end());
+        next= const_cast<ob::State *>(SMR[action].edges[0].target);
+        */
+        // Find the next state by maximizing transition probability
+        //Policy3 : largest Prob
+        /*
+        double maxProb = 1;
         for (const auto &edge : SMR[action].edges) {
-            if (edge.source == current && edge.prob > maxProb) {
+            if (edge.source == current && edge.prob < maxProb) {
                 maxProb = edge.prob;
                 next = const_cast<ob::State *>(edge.target); // Remove const for assignment
             }
         }
+        */
 
         if (!next) {
             std::cerr << "Error: No valid next state found! Path computation aborted." << std::endl;
@@ -375,13 +388,15 @@ int main() {
     std::vector<int> U = {0, 1}; // 0 means turn left, 1 means turn right
 
     // Parameters
-    int n = 10000;  // Number of nodes
+    int n = 2000;  // Number of nodes
     int m = 10;   // Number of sample points per transition
 
     // Build SMR
     ob::State *OBS_STATE = si->allocState();
-
+    OBS_STATE->as<ob::SE2StateSpace::StateType>()->setX(9999);
+    OBS_STATE->as<ob::SE2StateSpace::StateType>()->setY(9999);
     std::unordered_map<int, Graph> smr = buildSMR(si, start, goal, n, U, m, OBS_STATE);
+
     std::cout << "SMR built" << std::endl;
 
     // Output results
@@ -401,16 +416,22 @@ int main() {
     //     }
     // }
 
+
+        }
+    }   
+    */
     // Query SMR using value iteration
     std::unordered_map<ob::State *, int> best_actions;
     std::unordered_map<ob::State *, double> values;
     tie(best_actions, values) = querySMR(smr, goal, OBS_STATE, 0.1);
+
     std::cout << "Optimal policy obtained" << std::endl;
 
     // for (const auto pair : best_actions) {
     //     auto se2state = pair.first->as<ob::SE2StateSpace::StateType>();
     //     std::cout << "Best action for state (" << std::to_string(se2state->getX()) << ", " << std::to_string(se2state->getY()) << ") is u=" << pair.second << std::endl;
     // }
+
     // Extract and print the path
     std::vector<ob::State *> path = extractPathFromPolicy(si, start, goal, best_actions, smr);
 
@@ -462,6 +483,7 @@ int main() {
     //     }
     //     sample_sd[i] = sqrt(sample_sd[i] / 20.0);
     //     std::cout << "Mean = " << sample_means[i] << " and sd = " << sample_sd[i] << " for n = " << n << std::endl;
+
     // }
 
     // Free memory in roadmap
