@@ -109,6 +109,7 @@ void propagateCircularArc(const ob::State *s, const int u, const double r, const
     q->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setX(x_new);
     q->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setY(y_new);
     q->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setYaw(theta_new);
+    q->as<NeedleStateSpace::StateType>()->as<ob::RealVectorStateSpace::StateType>(1)->values[0] = u;
 }
 
 bool isCollisionFreePath(const ob::State *s1, const ob::State *s2, const int u, const double r, const double delta, ob::SpaceInformationPtr si)
@@ -202,6 +203,10 @@ std::unordered_map<int, Graph> buildSMR(
     auto sampler = si->allocStateSampler();
     while (nn->size() < static_cast<size_t>(n+2)) {
         sampler->sampleUniform(q);
+
+        // Set the turning direction to a binary integer 
+        double real_b = q->as<NeedleStateSpace::StateType>()->as<ob::RealVectorStateSpace::StateType>(1)->values[0];
+        q->as<NeedleStateSpace::StateType>()->as<ob::RealVectorStateSpace::StateType>(1)->values[0] = floor(real_b);
         if (si->isValid(q)) {
             nn->add(si->cloneState(q));
         }
@@ -483,7 +488,7 @@ int main(int argc, char* argv[]) {
     
     ob::RealVectorBounds bBounds(1);
     bBounds.setLow(0);
-    bBounds.setHigh(1);
+    bBounds.setHigh(2);
     space->getSubspace(1)->as<ob::RealVectorStateSpace>()->setBounds(bBounds);
 
     // Create space information
@@ -497,10 +502,12 @@ int main(int argc, char* argv[]) {
     start->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setX(-.5);
     start->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setY(-.4);
     start->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setYaw(0.0);
+    start->as<NeedleStateSpace::StateType>()->as<ob::RealVectorStateSpace::StateType>(1)->values[0] = 0;
 
     goal->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setX(.5);
     goal->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setY(.4);
     goal->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setYaw(0.0);
+    goal->as<NeedleStateSpace::StateType>()->as<ob::RealVectorStateSpace::StateType>(1)->values[0] = 0;
 
     // Create environment
     obstacles.clear();
@@ -522,6 +529,8 @@ int main(int argc, char* argv[]) {
     ob::State *OBS_STATE = si->allocState();
     OBS_STATE->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setX(9999);
     OBS_STATE->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setY(9999);
+    OBS_STATE->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setYaw(0);
+    OBS_STATE->as<NeedleStateSpace::StateType>()->as<ob::RealVectorStateSpace::StateType>(1)->values[0] = 0;
 
     // Build SMR
     std::unordered_map<int, Graph> smr = buildSMR(si, n, U, m, OBS_STATE, nn);
