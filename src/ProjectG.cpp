@@ -463,7 +463,7 @@ std::tuple<int, int,int, bool> parseArguments(int argc, char* argv[]) {
         throw std::invalid_argument("The third argument must be an integer (n).");
     }
     // Check for the optional verbose flag
-    if (argc > 4 && std::string(argv[5]) == "--verbose") {
+    if (argc > 4 && std::string(argv[4]) == "--verbose") {
         verbose = true;
     }
 
