@@ -234,6 +234,9 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
             // It is assumed that when the robot reaches a goal or obstacle state, it stops
             if (reward[state] == 1 || state == OBS_STATE) {
                 new_values[state] = reward[state];
+                if (new_values[state] - values[state] > max_change_in_value) {
+                    max_change_in_value = new_values[state] - values[state];
+                }
                 continue;
             }
 
@@ -267,6 +270,7 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
             break;
         }
     }
+    std::cout << "Finished in " << iter << " iterations." << std::endl;
 
     if (iter == max_iterations) {
         std::cerr << "Warning: Value iteration reached max iterations before convergence" << std::endl;
@@ -469,6 +473,15 @@ int main(int argc, char* argv[]) {
     std::unordered_map<ob::State *, double> values;
     double radius = 0.1;
     tie(best_actions, values) = querySMR(smr, goal, OBS_STATE, radius);
+    // std::ofstream valuesFile("values.txt");
+    // if (valuesFile.is_open()) {
+    //     for (auto *v: smr.at(0).vertices) {
+    //         double x = v->as<ob::SE2StateSpace::StateType>()->getX();
+    //         double y = v->as<ob::SE2StateSpace::StateType>()->getY();
+    //         valuesFile << x << "," << y << "," << values[v] << std::endl;
+    //     }
+    //     std::cout << "Written to values.txt" << std::endl;
+    // }
 
     if (verbose) {
         std::cout << "Optimal policy obtained" << std::endl;
