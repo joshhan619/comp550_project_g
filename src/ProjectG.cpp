@@ -84,7 +84,7 @@ bool isCollisionFree(const ob::State *state) {
     std::tie(x, y, std::ignore) = getCoord(state);
 
     // Check for going out of bounds
-    if (x < -0.5 || x > 0.5 || y < -0.5 || y > 0.5) {
+    if (x < 0 || x > 10 || y < 0 || y > 10) {
         return false;
     }
 
@@ -138,7 +138,7 @@ void getTransitions(
     const ob::SpaceInformationPtr si, 
     const int m, 
     ob::State *OBS_STATE, 
-    std::map<ob::State *, double> &transitions)
+    std::vector<std::tuple<ob::State *, double>> &transitions)
 {
     ompl::RNG rng;
     transitions.clear();
@@ -150,6 +150,7 @@ void getTransitions(
     double sigma_delta_1 = 0.2;
     double sigma_r_0 = 0.5;
     double sigma_r_1 = 1.0;
+    double prob_step = 1.0/m;
     for (int i = 0; i < m; i++) 
     {
         // Generate sample transitions for needle
@@ -175,15 +176,7 @@ void getTransitions(
             // Set Vertex t to obstacle state
             t = OBS_STATE;
         }
-        
-        // Find if transitions already contains Vertex t
-        if (transitions.count(t) > 0) {
-            // Update probability of transitions from Vertex t
-            transitions[t] += 1.0/m;
-        } else {
-            // Initialize probability of transitions from Vertex t
-            transitions[t] = 1.0/m;
-        }
+        transitions.push_back(std::make_tuple(t, prob_step));
     }
     si->freeState(q);
 }
@@ -221,11 +214,11 @@ std::unordered_map<int, Graph> buildSMR(
         graph.vertices = nn;
 
         // Add edges for each vertex and action
-        std::map<ob::State *, double> transitions;
+        std::vector<std::tuple<ob::State *, double>> transitions;
         for (ob::State *s : V) {
             getTransitions(nn, s, u, si, m, OBS_STATE, transitions);
             for (auto &transition : transitions) {
-                graph.edges.push_back({s, transition.first, transition.second});
+                graph.edges.push_back({s, std::get<0>(transition), std::get<1>(transition)});
             }
         }
 
@@ -239,7 +232,13 @@ bool isGoalReachable(ob::State *q, ob::State *goal, double radius, ob::SpaceInfo
     return si->distance(q, goal) <= radius;
 }
 
-std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *, double>> querySMR(std::unordered_map<int, Graph> SMR, ob::State *goal, ob::State *OBS_STATE, double radius, ob::SpaceInformationPtr si) {
+std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *, double>> querySMR(
+    std::unordered_map<int, Graph> SMR, 
+    ob::State *goal, 
+    ob::State *OBS_STATE, 
+    double radius, 
+    ob::SpaceInformationPtr si)
+{
     // Build transition probability matrix
     std::unordered_map<int, std::map<ob::State *, std::map<ob::State *, double>>> prob;
      
@@ -293,7 +292,7 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
                 int u = roadmap.first;
                 double exp_val = 0;
                 for (auto pair : prob[u][state]) {
-                    // pair.first accesses a state that stransitions from the current state
+                    // pair.first accesses a state that transitions from the current state
                     // pair.second provides the probability from the current state to the next
                     ob::State *next = pair.first;
                     double probability = pair.second;
@@ -330,19 +329,19 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
 void makeEnvironment(std::vector<Rectangle> &  obstacles )
 {
     // Fill in the vector of rectangles with your street environment.
-    Rectangle obs1;
-    obs1.x =-.5;
-    obs1.y=-.5;
-    obs1.width=1;
-    obs1.height=.05;
-    obstacles.push_back(obs1);
+    // Rectangle obs1;
+    // obs1.x =-.5;
+    // obs1.y=-.5;
+    // obs1.width=1;
+    // obs1.height=.05;
+    // obstacles.push_back(obs1);
    
-    Rectangle obs2;
-    obs2.x =-.5;
-    obs2.y=.45;
-    obs2.width=1;
-    obs2.height=.05;
-    obstacles.push_back(obs2);
+    // Rectangle obs2;
+    // obs2.x =-.5;
+    // obs2.y=.45;
+    // obs2.width=1;
+    // obs2.height=.05;
+    // obstacles.push_back(obs2);
     
     // Rectangle obs3;
     // obs3.x =-.5;
@@ -369,7 +368,10 @@ std::vector<ob::State *> extractPathFromPolicy(
     std::vector<ob::State *> path;
     ob::State *current = start;
 
-    while (true) {
+    int max_iterations = 1000;
+    int iter = 0;
+    while (iter < max_iterations) {
+        iter++;
         path.push_back(current);
 
         // Stop if goal is reached
@@ -398,7 +400,6 @@ std::vector<ob::State *> extractPathFromPolicy(
         }
         else if(policy==2)
         {
-        
             // Policy2 random choose next vertex
             ompl::RNG rng; // Persistent RNG instance
             rng.shuffle(SMR[action].edges.begin(), SMR[action].edges.end());
@@ -482,8 +483,8 @@ int main(int argc, char* argv[]) {
     // Create space
     auto space = std::make_shared<NeedleStateSpace>();
     ob::RealVectorBounds bounds(2);
-    bounds.setLow(-0.5);
-    bounds.setHigh(.5);
+    bounds.setLow(0);
+    bounds.setHigh(10);
     space->getSubspace(0)->as<ob::SE2StateSpace>()->setBounds(bounds);
     
     ob::RealVectorBounds bBounds(1);
@@ -499,14 +500,14 @@ int main(int argc, char* argv[]) {
     ob::State *start = si->allocState();
     ob::State *goal = si->allocState();
 
-    start->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setX(-.5);
-    start->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setY(-.4);
-    start->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setYaw(0.0);
+    start->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setX(0);
+    start->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setY(4);
+    start->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setYaw(0);
     start->as<NeedleStateSpace::StateType>()->as<ob::RealVectorStateSpace::StateType>(1)->values[0] = 0;
 
-    goal->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setX(.5);
-    goal->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setY(.4);
-    goal->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setYaw(0.0);
+    goal->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setX(8);
+    goal->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setY(8);
+    goal->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setYaw(M_PI);
     goal->as<NeedleStateSpace::StateType>()->as<ob::RealVectorStateSpace::StateType>(1)->values[0] = 0;
 
     // Create environment

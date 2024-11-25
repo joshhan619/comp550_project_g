@@ -10,8 +10,8 @@ def visualize_value_function(states, values):
     
     for state, value in zip(states, values):
         x, y = state
-        cellx = int(x//0.1) + 5
-        celly = int(y//0.1) + 5
+        cellx = int(x)
+        celly = int(y)
         if x == 0.5:
             cellx = 9
         if y == 0.5:
@@ -20,7 +20,8 @@ def visualize_value_function(states, values):
         value_grid_count[cellx, celly] += 1
 
     value_grid /= value_grid_count
-    ticklabels = ["{:.1f}".format(0.1*x-0.5) for x in range(10)]
+    # ticklabels = ["{:.1f}".format(0.1*x-0.5) for x in range(10)]
+    ticklabels = [i for i in range(10)]
 
     ax = sns.heatmap(value_grid, cmap="plasma", xticklabels=ticklabels, yticklabels=ticklabels)
     ax.invert_yaxis()
