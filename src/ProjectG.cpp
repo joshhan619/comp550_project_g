@@ -316,7 +316,8 @@ std::vector<ob::State *> extractPathFromPolicy(
     ob::State *start, ob::State *goal, 
     std::unordered_map<ob::State *, int> &best_actions, 
     std::unordered_map<int, Graph> &SMR,
-    bool verbose){
+    bool verbose,
+    int policy ){
 
     std::vector<ob::State *> path;
     ob::State *current = start;
@@ -334,31 +335,42 @@ std::vector<ob::State *> extractPathFromPolicy(
             std::cerr << "Error: No action for current state! Path computation aborted." << std::endl;
             break;
         }
-        // Policy1 choose random vertex but avoid obstcle state
         ob::State *next = nullptr;
         int action = best_actions[current];
-         for (const auto &edge : SMR[action].edges) {
-            if (edge.source == current && edge.target->as<ob::SE2StateSpace::StateType>()->getY()!=9999) {
-                next = const_cast<ob::State *>(edge.target); // Remove const for assignment
+        if(policy==1){
+            // Policy1 choose random vertex but avoid obstcle state
+            
+            
+            for (const auto &edge : SMR[action].edges) {
+                if (edge.source == current && edge.target->as<ob::SE2StateSpace::StateType>()->getY()!=9999) {
+                    next = const_cast<ob::State *>(edge.target); // Remove const for assignment
+                }
             }
         }
-        /*
-        // Policy2 random choose next vertex
-        ompl::RNG rng; // Persistent RNG instance
-        rng.shuffle(SMR[action].edges.begin(), SMR[action].edges.end());
-        next= const_cast<ob::State *>(SMR[action].edges[0].target);
-        */
+        else if(policy==2)
+        {
+        
+            // Policy2 random choose next vertex
+            ompl::RNG rng; // Persistent RNG instance
+            rng.shuffle(SMR[action].edges.begin(), SMR[action].edges.end());
+            next= const_cast<ob::State *>(SMR[action].edges[0].target);
+       
+        }
+        else if(policy==3)
+        {
         // Find the next state by maximizing transition probability
         //Policy3 : largest Prob
-        /*
-        double maxProb = 1;
-        for (const auto &edge : SMR[action].edges) {
-            if (edge.source == current && edge.prob < maxProb) {
-                maxProb = edge.prob;
-                next = const_cast<ob::State *>(edge.target); // Remove const for assignment
+
+            double maxProb = 1;
+            for (const auto &edge : SMR[action].edges) {
+                if (edge.source == current && edge.prob < maxProb) {
+                    maxProb = edge.prob;
+                    next = const_cast<ob::State *>(edge.target); // Remove const for assignment
+                }
             }
         }
-        */
+        else
+            std::cout<<"No such policy"<<std::endl;
 
         if (!next) {
             if (verbose) {
@@ -373,13 +385,13 @@ std::vector<ob::State *> extractPathFromPolicy(
     return path;
 }
 
-std::tuple<int, int, bool> parseArguments(int argc, char* argv[]) {
+std::tuple<int, int,int, bool> parseArguments(int argc, char* argv[]) {
     // Check if the required arguments are provided
-    if (argc < 3) {
+    if (argc < 4) {
         throw std::invalid_argument("Usage: ./program (sample size) (sample transitions) [--verbose]");
     }
 
-    int n, m;
+    int n, m, policy;
     bool verbose = false;
 
     try {
@@ -395,13 +407,18 @@ std::tuple<int, int, bool> parseArguments(int argc, char* argv[]) {
     } catch (const std::exception& e) {
         throw std::invalid_argument("The second argument must be an integer (n).");
     }
-
+    try {
+        // First argument is n
+        policy = std::stoi(argv[3]);
+    } catch (const std::exception& e) {
+        throw std::invalid_argument("The third argument must be an integer (n).");
+    }
     // Check for the optional verbose flag
-    if (argc > 3 && std::string(argv[3]) == "--verbose") {
+    if (argc > 3 && std::string(argv[4]) == "--verbose") {
         verbose = true;
     }
 
-    return {n, m, verbose};
+    return {n, m, policy,verbose};
 }
 
 int main(int argc, char* argv[]) {
@@ -409,7 +426,8 @@ int main(int argc, char* argv[]) {
     auto parsedArgs = parseArguments(argc, argv);
     int n = std::get<0>(parsedArgs);
     int m = std::get<1>(parsedArgs);
-    bool verbose = std::get<2>(parsedArgs);
+    int policy = std::get<2>(parsedArgs);
+    bool verbose = std::get<3>(parsedArgs);
     std::cout << "n: " << n << ", m: " << m << ", verbose: " << (verbose ? "true" : "false") << std::endl;
     
     // Create space
@@ -500,11 +518,11 @@ int main(int argc, char* argv[]) {
     }
 
     // Experiment 2: Test SMR's sensitivity to sample size n
-
+   
     int successCount = 0;
     for (int k = 0; k < 1000; k++) {
         // Extract and print the path
-        std::vector<ob::State *> path = extractPathFromPolicy(si, start, goal, best_actions, smr, verbose);
+        std::vector<ob::State *> path = extractPathFromPolicy(si, start, goal, best_actions, smr, verbose,policy);
         if (!path.empty() && isGoalReachable(path.back(), goal, radius)) {
             // This path reached the goal
             successCount++;
