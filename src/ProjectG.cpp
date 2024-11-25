@@ -3,6 +3,8 @@
 #include <ompl/base/StateSpace.h>
 #include <ompl/base/spaces/RealVectorStateSpace.h>
 #include <ompl/util/RandomNumbers.h>
+#include <ompl/datastructures/NearestNeighbors.h>
+#include <ompl/datastructures/NearestNeighborsSqrtApprox.h>
 #include <vector>
 #include <unordered_map>
 #include <set>
@@ -33,7 +35,7 @@ struct Edge {
 };
 
 struct Graph {
-    std::vector<ob::State *> vertices;
+    std::shared_ptr<ompl::NearestNeighbors<ob::State *>> vertices;
     std::vector<Edge> edges;
 };
 
@@ -128,7 +130,14 @@ bool isCollisionFreePath(const ob::State *s1, const ob::State *s2, const int u, 
     return true;
 }
 
-void getTransitions(std::vector<ob::State *> &V, const ob::State *s, const int u, const ob::SpaceInformationPtr si, const int m, ob::State *OBS_STATE, std::map<ob::State *, double> &transitions)
+void getTransitions(
+    std::shared_ptr<ompl::NearestNeighbors<ob::State *>> nn, 
+    const ob::State *s, 
+    const int u, 
+    const ob::SpaceInformationPtr si, 
+    const int m, 
+    ob::State *OBS_STATE, 
+    std::map<ob::State *, double> &transitions)
 {
     ompl::RNG rng;
     transitions.clear();
@@ -160,14 +169,7 @@ void getTransitions(std::vector<ob::State *> &V, const ob::State *s, const int u
         ob::State *t = nullptr;
         if (isCollisionFreePath(s, q, u, r, delta, si)) {
             // Find Vertex t that minimizes dist(q, t)
-            double minDistance = std::numeric_limits<double>::infinity();
-            for (ob::State *v : V) {
-                double dist = si->distance(q, v);
-                if (dist < minDistance) {
-                    minDistance = dist;
-                    t = v;
-                }
-            }
+            t = nn->nearest(q);
         } else {
             // Set Vertex t to obstacle state
             t = OBS_STATE;
@@ -185,34 +187,38 @@ void getTransitions(std::vector<ob::State *> &V, const ob::State *s, const int u
     si->freeState(q);
 }
 
-std::unordered_map<int, Graph> buildSMR(ob::SpaceInformationPtr si, ob::State *start, ob::State *goal, int n, const std::vector<int> &U, int m, ob::State *OBS_STATE) {
+std::unordered_map<int, Graph> buildSMR(
+    ob::SpaceInformationPtr si, 
+    int n, 
+    const std::vector<int> &U, 
+    int m, 
+    ob::State *OBS_STATE,
+    std::shared_ptr<ompl::NearestNeighbors<ob::State *>> nn) 
+{
     std::unordered_map<int, Graph> SMR; // Map of graphs for each action u
-
-    // Initialize vertices set
-    std::vector<ob::State *> V;
-    V.push_back(start);
-    V.push_back(goal);
 
     // Sample n collision free states
     ob::State *q = si->allocState();
     auto sampler = si->allocStateSampler();
-    while (V.size() < static_cast<size_t>(n+2)) {
+    while (nn->size() < static_cast<size_t>(n+2)) {
         sampler->sampleUniform(q);
         if (si->isValid(q)) {
-            V.push_back(si->cloneState(q));
+            nn->add(si->cloneState(q));
         }
     }
     si->freeState(q);
 
     // Build graphs for each action u
+    std::vector<ob::State *> V;
+    nn->list(V);
     for (int u : U) {
         Graph graph;
-        graph.vertices = V;
+        graph.vertices = nn;
 
         // Add edges for each vertex and action
         std::map<ob::State *, double> transitions;
         for (ob::State *s : V) {
-            getTransitions(V, s, u, si, m, OBS_STATE, transitions);
+            getTransitions(nn, s, u, si, m, OBS_STATE, transitions);
             for (auto &transition : transitions) {
                 graph.edges.push_back({s, transition.first, transition.second});
             }
@@ -246,7 +252,8 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
     // Initialize values
     std::unordered_map<ob::State *, double> values;
     std::unordered_map<ob::State *, double> reward;
-    std::vector<ob::State *> &states = SMR[0].vertices;
+    std::vector<ob::State *> states;
+    SMR[0].vertices->list(states);
     for (const auto &state : states) {
         values[state] = 0;
         if (isGoalReachable(state, goal, radius, si)) {
@@ -317,8 +324,7 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
 }
 void makeEnvironment(std::vector<Rectangle> &  obstacles )
 {
-    
-    // TODO: Fill in the vector of rectangles with your street environment.
+    // Fill in the vector of rectangles with your street environment.
     Rectangle obs1;
     obs1.x =-.5;
     obs1.y=-.5;
@@ -500,6 +506,15 @@ int main(int argc, char* argv[]) {
     obstacles.clear();
     makeEnvironment(obstacles);
 
+    // Initialize NearestNeighbors
+    auto nn = std::make_shared<ompl::NearestNeighborsSqrtApprox<ob::State *>>();
+    nn->setDistanceFunction([&](const ob::State *a, const ob::State *b){
+        return space->distance(a, b);
+    });
+    // Add start and goal states to vertices
+    nn->add(start);
+    nn->add(goal);
+
     // Define actions
     std::vector<int> U = {0, 1}; // 0 means turn left, 1 means turn right
 
@@ -509,7 +524,9 @@ int main(int argc, char* argv[]) {
     OBS_STATE->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setY(9999);
 
     // Build SMR
-    std::unordered_map<int, Graph> smr = buildSMR(si, start, goal, n, U, m, OBS_STATE);
+    std::unordered_map<int, Graph> smr = buildSMR(si, n, U, m, OBS_STATE, nn);
+    std::vector<ob::State *> V;
+    smr[0].vertices->list(V);
 
     // Output results
     if (verbose) {
@@ -537,7 +554,7 @@ int main(int argc, char* argv[]) {
     std::tie(best_actions, values) = querySMR(smr, goal, OBS_STATE, radius, si);
     std::ofstream valuesFile("values.txt");
     if (valuesFile.is_open()) {
-        for (auto *v: smr.at(0).vertices) {
+        for (auto *v: V) {
             double x, y;
             std::tie(x, y, std::ignore) = getCoord(v);
             valuesFile << x << "," << y << "," << values[v] << std::endl;
@@ -595,7 +612,7 @@ int main(int argc, char* argv[]) {
     }
     
     // Free memory in roadmap
-    for (auto *v: smr.at(0).vertices) {
+    for (auto *v: V) {
         if (v) {
             si->freeState(v);
         }
