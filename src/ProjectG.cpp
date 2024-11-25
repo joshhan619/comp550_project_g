@@ -210,9 +210,13 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
 
     // Initialize values
     std::unordered_map<ob::State *, double> values;
+    std::unordered_map<ob::State *, double> reward;
     std::vector<ob::State *> &states = SMR[0].vertices;
     for (const auto &state : states) {
         values[state] = 0;
+        if (isGoalReachable(state, goal, radius)) {
+            reward[state] = 1;
+        }
     }
 
     // Initialize data structure to hold the best actions for each state
@@ -227,13 +231,9 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
         iter++;
         double max_change_in_value = 0;
         for (const auto &state : states) {
-            double reward = 0;
-            if (isGoalReachable(state, goal, radius)) {
-                reward = 1;
-            }
             // It is assumed that when the robot reaches a goal or obstacle state, it stops
-            if (state == goal || state == OBS_STATE) {
-                new_values[state] = reward;
+            if (reward[state] == 1 || state == OBS_STATE) {
+                new_values[state] = reward[state];
                 continue;
             }
 
@@ -255,7 +255,7 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
                     best_actions[state] = u;
                 }
             }
-            new_values[state] = reward + maxExpectedValue;
+            new_values[state] = reward[state] + maxExpectedValue;
 
             if (new_values[state] - values[state] > max_change_in_value) {
                 max_change_in_value = new_values[state] - values[state];
