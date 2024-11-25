@@ -1,20 +1,32 @@
 import matplotlib.pyplot as plt
 import math
 
-if __name__ == '__main__':
-    with open('output.txt') as f:
+def openFile(filepath):
+    with open(filepath) as f:
         lines = f.readlines()
-        means = []
-        sds = []
-        sample_sizes = []
+        mean = 0
+        sd = 0
         for line in lines:
-            [n, mean, sd] = line.rstrip().split(",")
-            means.append(float(mean))
-            sds.append(float(sd))
-            sample_sizes.append(math.log10(int(n)))
+            mean += float(line)
+
+        mean /= len(lines)
+        for line in lines:
+            sd += (float(line) - mean)**2
+        
+        sd = math.sqrt(sd/len(lines))
+        return mean, sd
+
+if __name__ == '__main__':
+    means = []
+    sds = []
+    sample_sizes = [1000, 10000, 100000, 1000000]
+    for n in sample_sizes:
+        for i in range(20):
+            mean, sd = openFile(f"experiments/output{n}.txt")
+            mean.append(mean)
+            sds.append(sd)
 
     fig, ax = plt.subplots()
-    print(sample_sizes, means, sds)
     ax.errorbar(sample_sizes, means, sds, linestyle='None', fmt='o')
     ax.set_ylabel("Mean difference: Actual vs Expected Probability")
     ax.set_xlabel("Log(Sample Size)")

@@ -311,7 +311,8 @@ std::vector<ob::State *> extractPathFromPolicy(
     ob::SpaceInformationPtr si, 
     ob::State *start, ob::State *goal, 
     std::unordered_map<ob::State *, int> &best_actions, 
-    std::unordered_map<int, Graph> &SMR){
+    std::unordered_map<int, Graph> &SMR,
+    bool verbose){
 
     std::vector<ob::State *> path;
     ob::State *current = start;
@@ -356,7 +357,9 @@ std::vector<ob::State *> extractPathFromPolicy(
         */
 
         if (!next) {
-            std::cerr << "Error: No valid next state found! Path computation aborted." << std::endl;
+            if (verbose) {
+                std::cerr << "Error: No valid next state found! Path computation aborted." << std::endl;
+            }
             break;
         }
 
@@ -365,7 +368,47 @@ std::vector<ob::State *> extractPathFromPolicy(
 
     return path;
 }
-int main() {
+
+std::tuple<int, int, bool> parseArguments(int argc, char* argv[]) {
+    // Check if the required arguments are provided
+    if (argc < 3) {
+        throw std::invalid_argument("Usage: ./program (sample size) (sample transitions) [--verbose]");
+    }
+
+    int n, m;
+    bool verbose = false;
+
+    try {
+        // First argument is n
+        n = std::stoi(argv[1]);
+    } catch (const std::exception& e) {
+        throw std::invalid_argument("The first argument must be an integer (n).");
+    }
+
+    try {
+        // First argument is n
+        m = std::stoi(argv[2]);
+    } catch (const std::exception& e) {
+        throw std::invalid_argument("The second argument must be an integer (n).");
+    }
+
+    // Check for the optional verbose flag
+    if (argc > 3 && std::string(argv[3]) == "--verbose") {
+        verbose = true;
+    }
+
+    return {n, m, verbose};
+}
+
+int main(int argc, char* argv[]) {
+    // Parse arguments
+    auto parsedArgs = parseArguments(argc, argv);
+    int n = std::get<0>(parsedArgs);
+    int m = std::get<1>(parsedArgs);
+    bool verbose = std::get<2>(parsedArgs);
+    std::cout << "n: " << n << ", m: " << m << ", verbose: " << (verbose ? "true" : "false") << std::endl;
+    
+    // Create space
     auto space = std::make_shared<ob::SE2StateSpace>();
     ob::RealVectorBounds bounds(2);
     bounds.setLow(-0.5);
@@ -379,7 +422,6 @@ int main() {
     // Create start and goal positions
     ob::State *start = si->allocState();
     ob::State *goal = si->allocState();
-
 
     start->as<ob::SE2StateSpace::StateType>()->setX(-.5);
     start->as<ob::SE2StateSpace::StateType>()->setY(-.4);
@@ -396,113 +438,86 @@ int main() {
     // Define actions
     std::vector<int> U = {0, 1}; // 0 means turn left, 1 means turn right
 
-    // Parameters
-    int n = 2000;  // Number of nodes
-    int m = 10;   // Number of sample points per transition
-
-    // Build SMR
+    // Set obstacle state
     ob::State *OBS_STATE = si->allocState();
     OBS_STATE->as<ob::SE2StateSpace::StateType>()->setX(9999);
     OBS_STATE->as<ob::SE2StateSpace::StateType>()->setY(9999);
+
+    // Build SMR
     std::unordered_map<int, Graph> smr = buildSMR(si, start, goal, n, U, m, OBS_STATE);
 
-    std::cout << "SMR built" << std::endl;
-
     // Output results
-    // for (const auto roadmap : smr) {
-    //     int u = roadmap.first;
-    //     Graph graph = roadmap.second;
-    //     for (const auto &e : graph.edges) {
-    //         auto source = e.source->as<ob::SE2StateSpace::StateType>();
-    //         auto target = e.target->as<ob::SE2StateSpace::StateType>();
-    //         std::string sStr = "(" + std::to_string(source->getX()) + ", " + std::to_string(source->getY()) + ")";
-    //         std::string tStr = "(" + std::to_string(target->getX()) + std::to_string(target->getY()) + ")";
-    //         std::cout << "Transition prob from " << sStr << " to " << tStr << " is " << e.prob << " with action u=" << u << std::endl;
-    //         if (e.target == goal) {
-    //             std::cout << "This path leads to the goal" << std::endl;
-    //         }
-
-    //     }
-    // }
-
-
-    // Query SMR using value iteration
-    std::unordered_map<ob::State *, int> best_actions;
-    std::unordered_map<ob::State *, double> values;
-    tie(best_actions, values) = querySMR(smr, goal, OBS_STATE, 0.1);
-
-    std::cout << "Optimal policy obtained" << std::endl;
-
-    // for (const auto pair : best_actions) {
-    //     auto se2state = pair.first->as<ob::SE2StateSpace::StateType>();
-    //     std::cout << "Best action for state (" << std::to_string(se2state->getX()) << ", " << std::to_string(se2state->getY()) << ") is u=" << pair.second << std::endl;
-    // }
-
-    // Extract and print the path
-    std::vector<ob::State *> path = extractPathFromPolicy(si, start, goal, best_actions, smr);
-
-    std::cout << "Path from start to goal:" << std::endl;
-    for (const auto &state : path) {
-        double x = state->as<ob::SE2StateSpace::StateType>()->getX();
-        double y = state->as<ob::SE2StateSpace::StateType>()->getY();
-        double yaw = state->as<ob::SE2StateSpace::StateType>()->getYaw();
-        std::cout << "(" << x << ", " << y << ", " << yaw << ")" << std::endl;
-
+    if (verbose) {
+        for (const auto roadmap : smr) {
+            int u = roadmap.first;
+            Graph graph = roadmap.second;
+            for (const auto &e : graph.edges) {
+                auto source = e.source->as<ob::SE2StateSpace::StateType>();
+                auto target = e.target->as<ob::SE2StateSpace::StateType>();
+                std::string sStr = "(" + std::to_string(source->getX()) + ", " + std::to_string(source->getY()) + ")";
+                std::string tStr = "(" + std::to_string(target->getX()) + std::to_string(target->getY()) + ")";
+                std::cout << "Transition prob from " << sStr << " to " << tStr << " is " << e.prob << " with action u=" << u << std::endl;
+                if (e.target == goal) {
+                    std::cout << "This path leads to the goal" << std::endl;
+                }
+            }
+        }
     }
 
-    for (const auto pair : values) {
-        if (pair.first != start) {
-            continue;
+    // Obtain optimal policy by querying SMR using value iteration
+    std::unordered_map<ob::State *, int> best_actions;
+    std::unordered_map<ob::State *, double> values;
+    double radius = 0.1;
+    tie(best_actions, values) = querySMR(smr, goal, OBS_STATE, radius);
+
+    if (verbose) {
+        std::cout << "Optimal policy obtained" << std::endl;
+        for (const auto pair : best_actions) {
+            auto se2state = pair.first->as<ob::SE2StateSpace::StateType>();
+            std::cout << "Best action for state (" << std::to_string(se2state->getX()) << ", " << std::to_string(se2state->getY()) << ") is u=" << pair.second << std::endl;
         }
-        auto se2state = pair.first->as<ob::SE2StateSpace::StateType>();
-        std::cout << "Probability for state (" << se2state->getX() << ", " << se2state->getY() << ") to reach goal: " << pair.second << std::endl;
+
+        for (const auto pair : values) {
+            if (pair.first != start) {
+                continue;
+            }
+            auto se2state = pair.first->as<ob::SE2StateSpace::StateType>();
+            std::cout << "Probability for state (" << se2state->getX() << ", " << se2state->getY() << ") to reach goal: " << pair.second << std::endl;
+        }
     }
 
     // Experiment 2: Test SMR's sensitivity to sample size n
-    int sample_size[4] = {1000, 10000, 100, 100};
-    double sample_means[4];
-    double sample_sd[4];
-    for (int i = 0; i < 4; i++) {
-        int n = sample_size[i];
-        double sample_diff[20];
-        for (int j = 0; j < 20; j++) {
-            std::unordered_map<int, Graph> smr = buildSMR(si, start, goal, n, U, m, OBS_STATE);
-            std::unordered_map<ob::State *, int> best_actions;
-            std::unordered_map<ob::State *, double> values;
-            tie(best_actions, values) = querySMR(smr, goal, OBS_STATE, 0.1);
-            std::cout << "SMR queried" << std::endl;
-            int successCount = 0;
-            for (int k = 0; k < 1000; k++) {
-                std::vector<ob::State *> path = extractPathFromPolicy(si, start, goal, best_actions, smr);
-                if (!path.empty() && path.back() == goal) {
-                    // This path reached the goal
-                    successCount++;
-                }
-            }
-            double actualProb = successCount / 1000.0;
-            std::cout << "n = " << n << ". Actual probability is " << actualProb << ". Expected probability is " << values[start] << std::endl;
-            sample_diff[j] = actualProb - values[start];
-            sample_means[i] += sample_diff[j];
-        }
-        sample_means[i] /= 20.0;
-        for (int j = 0; j < 20; j++) {
-            sample_sd[i] += pow(sample_diff[j] - sample_means[i], 2);
-        }
-        sample_sd[i] = sqrt(sample_sd[i] / 20.0);
-        std::cout << "Mean = " << sample_means[i] << " and sd = " << sample_sd[i] << " for n = " << n << std::endl;
-    }
 
-    // Save means and standard deviations to output file
-    std::ofstream outputFile("output.txt");
-    if (outputFile.is_open()) {
-        for (int i = 0; i < 4; i++) {
-            outputFile << sample_size[i] << "," << sample_means[i] << "," << sample_sd[i] << std::endl;
+    int successCount = 0;
+    for (int k = 0; k < 1000; k++) {
+        // Extract and print the path
+        std::vector<ob::State *> path = extractPathFromPolicy(si, start, goal, best_actions, smr, verbose);
+        if (!path.empty() && isGoalReachable(path.back(), goal, radius)) {
+            // This path reached the goal
+            successCount++;
         }
+
+        if (verbose) {
+            std::cout << "Path from start to goal:" << std::endl;
+            for (const auto &state : path) {
+                double x = state->as<ob::SE2StateSpace::StateType>()->getX();
+                double y = state->as<ob::SE2StateSpace::StateType>()->getY();
+                double yaw = state->as<ob::SE2StateSpace::StateType>()->getYaw();
+                std::cout << "(" << x << ", " << y << ", " << yaw << ")" << std::endl;
+            }
+        }
+    }
+    double actualProb = successCount / 1000.0;
+    std::cout << "n = " << n << ". Actual probability is " << actualProb << ". Expected probability is " << values[start] << std::endl;
+
+    // Save actual and expected differences
+    std::ofstream outputFile("output" + std::to_string(n) + ".txt");
+    if (outputFile.is_open()) {
+        outputFile << actualProb - values[start] << std::endl;
         outputFile.close();
-        std::cout << "Means and standard deviations of experiment 2 written to output.txt" << std::endl;
+        std::cout << "Written to output" + std::to_string(n) + ".txt." << std::endl;
     }
     
-
     // Free memory in roadmap
     for (auto *v: smr.at(0).vertices) {
         if (v) {
