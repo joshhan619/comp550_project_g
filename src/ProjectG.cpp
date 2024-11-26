@@ -279,7 +279,7 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
                 continue;
             }
 
-            double maxExpectedValue = 0.0;
+            double maxExpectedValue = -1.0;
             for (const auto &actionPair : prob) {
                 int u = actionPair.first;
                 double exp_val = 0.0;
@@ -303,7 +303,6 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
         values.swap(new_values);
 
         // Stop if the max change between the old and new value for every state is below threshold
-        std::cout << max_change_in_value << std::endl;
         if (max_change_in_value < threshold) {
             break;
         }
@@ -426,13 +425,65 @@ std::vector<ob::State *> extractPathFromPolicy(
     return path;
 }
 
+ std::vector<std::tuple<ob::State *, double, double, int>> simulatePath(
+    std::shared_ptr<ompl::NearestNeighborsSqrtApprox<ob::State *>> nn, 
+    std::unordered_map<ob::State *, int> best_actions, 
+    ob::SpaceInformationPtr si,
+    ob::State *start,
+    ob::State *goal,
+    double radius,
+    ob::State *OBS_STATE) 
+{
+    std::vector<std::tuple<ob::State *, double, double, int>> path;
+    ob::State *current = start;
+
+    ompl::RNG rng;
+
+    double delta_0 = 0.5;
+    double r_0 = 2.5;
+    double sigma_delta_0 = 0.1;
+    double sigma_delta_1 = 0.2;
+    double sigma_r_0 = 0.5;
+    double sigma_r_1 = 1.0;
+
+    // Starting after the start state, provide delta and r values
+    double delta = -1;
+    double r = -1;
+    int u = -1;
+
+    int max_iterations = 100; // Arbitrary stopping point
+    int iter = 0;
+    ob::State *temp = si->allocState();
+    while (iter++ < max_iterations) {
+        u = best_actions.at(current);
+        if (u == 0) {
+            delta = rng.gaussian(delta_0, sigma_delta_0);
+            r = rng.gaussian(r_0, sigma_r_0);
+        } else {
+            delta = rng.gaussian(delta_0, sigma_delta_1);
+            r = rng.gaussian(r_0, sigma_r_1);
+        }
+
+        propagateCircularArc(current, u, r, delta, temp);
+        current = nn->nearest(temp);
+        path.push_back(std::make_tuple(current, delta, r, u));
+        if (isGoalReachable(current, goal, radius, si) || current == OBS_STATE) {
+            // Stop when a successful path is found
+            si->freeState(temp);
+            return path;
+        }
+    }
+    si->freeState(temp);
+    return path;
+}
+
 std::tuple<int, int,int, bool> parseArguments(int argc, char* argv[]) {
     // Check if the required arguments are provided
     if (argc < 4) {
-        throw std::invalid_argument("Usage: ./program (sample size) (sample transitions) (policy option) [--verbose]");
+        throw std::invalid_argument("Usage: ./program (sample size) (sample transitions) (experiment bool) [--verbose]");
     }
 
-    int n, m, policy;
+    int n, m, run_experiment;
     bool verbose = false;
 
     try {
@@ -443,14 +494,14 @@ std::tuple<int, int,int, bool> parseArguments(int argc, char* argv[]) {
     }
 
     try {
-        // First argument is n
+        // Second argument is m
         m = std::stoi(argv[2]);
     } catch (const std::exception& e) {
         throw std::invalid_argument("The second argument must be an integer (n).");
     }
     try {
-        // First argument is n
-        policy = std::stoi(argv[3]);
+        // Third argument will start the experiment
+        run_experiment = std::stoi(argv[3]);
     } catch (const std::exception& e) {
         throw std::invalid_argument("The third argument must be an integer (n).");
     }
@@ -459,7 +510,7 @@ std::tuple<int, int,int, bool> parseArguments(int argc, char* argv[]) {
         verbose = true;
     }
 
-    return {n, m, policy,verbose};
+    return {n, m, run_experiment, verbose};
 }
 
 int main(int argc, char* argv[]) {
@@ -467,7 +518,7 @@ int main(int argc, char* argv[]) {
     auto parsedArgs = parseArguments(argc, argv);
     int n = std::get<0>(parsedArgs);
     int m = std::get<1>(parsedArgs);
-    int policy = std::get<2>(parsedArgs);
+    int run_experiment = std::get<2>(parsedArgs);
     bool verbose = std::get<3>(parsedArgs);
     std::cout << "n: " << n << ", m: " << m << ", verbose: " << (verbose ? "true" : "false") << std::endl;
     
@@ -553,14 +604,18 @@ int main(int argc, char* argv[]) {
     std::unordered_map<ob::State *, double> values;
     double radius = 0.1;
     std::tie(best_actions, values) = querySMR(smr, goal, OBS_STATE, radius, si);
-    std::ofstream valuesFile("values.txt");
-    if (valuesFile.is_open()) {
-        for (auto *v: V) {
-            double x, y;
-            std::tie(x, y, std::ignore) = getCoord(v);
-            valuesFile << x << "," << y << "," << values[v] << std::endl;
+
+    if (run_experiment <= 0) {
+        std::ofstream valuesFile("values.txt");
+        if (valuesFile.is_open()) {
+            for (auto *v: V) {
+                double x, y;
+                std::tie(x, y, std::ignore) = getCoord(v);
+                valuesFile << x << "," << y << "," << values[v] << std::endl;
+            }
+            valuesFile.close();
+            std::cout << "Written to values.txt" << std::endl;
         }
-        std::cout << "Written to values.txt" << std::endl;
     }
 
     if (verbose) {
@@ -581,35 +636,60 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Experiment 2: Test SMR's sensitivity to sample size n
-   
-    int successCount = 0;
-    for (int k = 0; k < 1000; k++) {
-        // Extract and print the path
-        std::vector<ob::State *> path = extractPathFromPolicy(si, start, goal, best_actions, smr, verbose,policy);
-        if (!path.empty() && isGoalReachable(path.back(), goal, radius, si)) {
-            // This path reached the goal
-            successCount++;
-        }
+    if (run_experiment > 0) {
+        // Experiment 2: Test SMR's sensitivity to sample size n
+        int successCount = 0;
+        for (int k = 0; k < 1000; k++) {
+            // Extract and print the path
+            //std::vector<ob::State *> path = extractPathFromPolicy(si, start, goal, best_actions, smr, verbose,policy);
+            std::vector<std::tuple<ob::State *, double, double, int>> path = simulatePath(nn, best_actions, si, start, goal, radius, OBS_STATE); 
+            if (!path.empty()) {
+                ob::State *state = std::get<0>(path.back());
+                if (isGoalReachable(state, goal, radius, si)) {
+                    // This path reached the goal
+                    successCount++;
+                }
+            }
 
-        if (verbose) {
-            std::cout << "Path from start to goal:" << std::endl;
-            for (const auto &state : path) {
-                double x, y, theta;
-                std::tie(x, y, theta) = getCoord(state);
-                std::cout << "(" << x << ", " << y << ", " << theta << ")" << std::endl;
+            if (verbose) {
+                std::cout << "Path from start to goal:" << std::endl;
+                for (const auto &tuple : path) {
+                    ob::State *state = std::get<0>(tuple);
+                    double tau = std::get<1>(tuple);
+                    double r = std::get<2>(tuple);
+                    double x, y, theta;
+                    std::tie(x, y, theta) = getCoord(state);
+                    std::cout << "(" << x << ", " << y << ", " << theta << ")" << " with arc length " << tau << " and radius " << r << std::endl;
+                }
             }
         }
-    }
-    double actualProb = successCount / 1000.0;
-    std::cout << "n = " << n << ". Actual probability is " << actualProb << ". Expected probability is " << values[start] << std::endl;
+        double actualProb = successCount / 1000.0;
+        std::cout << "n = " << n << ". Actual probability is " << actualProb << ". Expected probability is " << values[start] << std::endl;
 
-    // Save actual and expected differences
-    std::ofstream outputFile("output" + std::to_string(n) + ".txt");
-    if (outputFile.is_open()) {
-        outputFile << actualProb - values[start] << std::endl;
-        outputFile.close();
-        std::cout << "Written to output" + std::to_string(n) + ".txt." << std::endl;
+        // Save actual and expected differences
+        std::ofstream outputFile("output" + std::to_string(n) + ".txt", std::ofstream::app);
+        if (outputFile.is_open()) {
+            outputFile << actualProb - values[start] << std::endl;
+            outputFile.close();
+            std::cout << "Written to output" + std::to_string(n) + ".txt." << std::endl;
+        }
+    } else {
+        // Simulate a path once and save path
+        std::vector<std::tuple<ob::State *, double, double, int>> path = simulatePath(nn, best_actions, si, start, goal, radius, OBS_STATE); 
+        std::ofstream pathFile("path.txt");
+        if (pathFile.is_open()) {
+            for (auto &tuple: path) {
+                ob::State *state = std::get<0>(tuple);
+                double x, y, theta;
+                std::tie(x, y, theta) = getCoord(state);
+                double tau = std::get<1>(tuple);
+                double r = std::get<2>(tuple);
+                int u = std::get<3>(tuple);
+                pathFile << x << "," << y << "," << theta << "," << tau << "," << r << "," << u << std::endl;
+            }
+            pathFile.close();
+            std::cout << "Written to path.txt" << std::endl;
+        }
     }
     
     // Free memory in roadmap

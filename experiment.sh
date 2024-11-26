@@ -8,9 +8,6 @@ iterations=20
 for n in "${n_values[@]}"; do
     for ((i=1; i<=iterations; i++)); do
         # Run the C++ program with the current n and m
-        ./ProjectG "$n" "$m"
-        
-        # Check if the output file exists
-        output_file="output${n}.txt"
+        ./ProjectG "$n" "$m" 1
     done
 done
