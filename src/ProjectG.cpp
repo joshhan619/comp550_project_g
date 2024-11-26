@@ -319,6 +319,20 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
 void makeEnvironment(std::vector<Rectangle> &  obstacles )
 {
     // Fill in the vector of rectangles with your street environment.
+    Rectangle obs1;
+    obs1.x = 3;
+    obs1.y = 6;
+    obs1.width = 3;
+    obs1.height = 2;
+    obstacles.push_back(obs1);
+   
+    Rectangle obs2;
+    obs2.x = 3;
+    obs2.y = 3;
+    obs2.width = 2;
+    obs2.height = 1;
+    obstacles.push_back(obs2);
+
     // Rectangle obs1;
     // obs1.x =-.5;
     // obs1.y=-.5;
@@ -431,8 +445,7 @@ std::vector<ob::State *> extractPathFromPolicy(
     ob::SpaceInformationPtr si,
     ob::State *start,
     ob::State *goal,
-    double radius,
-    ob::State *OBS_STATE) 
+    double radius) 
 {
     std::vector<std::tuple<ob::State *, double, double, int>> path;
     ob::State *current = start;
@@ -465,13 +478,19 @@ std::vector<ob::State *> extractPathFromPolicy(
         }
 
         propagateCircularArc(current, u, r, delta, temp);
-        current = nn->nearest(temp);
-        path.push_back(std::make_tuple(current, delta, r, u));
-        if (isGoalReachable(current, goal, radius, si) || current == OBS_STATE) {
+        if (!isCollisionFreePath(current, temp, u, r, delta, si)) {
+            // Stop when collision detected
+            si->freeState(temp);
+            return path;
+        }
+        
+        path.push_back(std::make_tuple(si->cloneState(temp), delta, r, u));
+        if (isGoalReachable(temp, goal, radius, si)) {
             // Stop when a successful path is found
             si->freeState(temp);
             return path;
         }
+        current = nn->nearest(temp);
     }
     si->freeState(temp);
     return path;
@@ -636,13 +655,14 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    std::vector<std::tuple<ob::State *, double, double, int>> path;
     if (run_experiment > 0) {
         // Experiment 2: Test SMR's sensitivity to sample size n
         int successCount = 0;
         for (int k = 0; k < 1000; k++) {
             // Extract and print the path
             //std::vector<ob::State *> path = extractPathFromPolicy(si, start, goal, best_actions, smr, verbose,policy);
-            std::vector<std::tuple<ob::State *, double, double, int>> path = simulatePath(nn, best_actions, si, start, goal, radius, OBS_STATE); 
+            path = simulatePath(nn, best_actions, si, start, goal, radius); 
             if (!path.empty()) {
                 ob::State *state = std::get<0>(path.back());
                 if (isGoalReachable(state, goal, radius, si)) {
@@ -655,11 +675,11 @@ int main(int argc, char* argv[]) {
                 std::cout << "Path from start to goal:" << std::endl;
                 for (const auto &tuple : path) {
                     ob::State *state = std::get<0>(tuple);
-                    double tau = std::get<1>(tuple);
+                    double delta = std::get<1>(tuple);
                     double r = std::get<2>(tuple);
                     double x, y, theta;
                     std::tie(x, y, theta) = getCoord(state);
-                    std::cout << "(" << x << ", " << y << ", " << theta << ")" << " with arc length " << tau << " and radius " << r << std::endl;
+                    std::cout << "(" << x << ", " << y << ", " << theta << ")" << " with arc length " << delta << " and radius " << r << std::endl;
                 }
             }
         }
@@ -675,17 +695,17 @@ int main(int argc, char* argv[]) {
         }
     } else {
         // Simulate a path once and save path
-        std::vector<std::tuple<ob::State *, double, double, int>> path = simulatePath(nn, best_actions, si, start, goal, radius, OBS_STATE); 
+        path = simulatePath(nn, best_actions, si, start, goal, radius); 
         std::ofstream pathFile("path.txt");
         if (pathFile.is_open()) {
             for (auto &tuple: path) {
                 ob::State *state = std::get<0>(tuple);
                 double x, y, theta;
                 std::tie(x, y, theta) = getCoord(state);
-                double tau = std::get<1>(tuple);
+                double delta = std::get<1>(tuple);
                 double r = std::get<2>(tuple);
                 int u = std::get<3>(tuple);
-                pathFile << x << "," << y << "," << theta << "," << tau << "," << r << "," << u << std::endl;
+                pathFile << x << "," << y << "," << theta << "," << delta << "," << r << "," << u << std::endl;
             }
             pathFile.close();
             std::cout << "Written to path.txt" << std::endl;
@@ -702,6 +722,12 @@ int main(int argc, char* argv[]) {
 
     if (OBS_STATE) {
         si->freeState(OBS_STATE);
+    }
+
+    // Free memory in path
+    for (auto tuple: path) {
+        ob::State *state = std::get<0>(tuple);
+        si->freeState(state);
     }
 
     return 0;
