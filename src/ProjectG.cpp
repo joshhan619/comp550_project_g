@@ -194,7 +194,7 @@ std::unordered_map<int, Graph> buildSMR(
     // Sample n collision free states
     ob::State *q = si->allocState();
     auto sampler = si->allocStateSampler();
-    while (nn->size() < static_cast<size_t>(n+2)) {
+    while (nn->size() < static_cast<size_t>(n)) {
         sampler->sampleUniform(q);
 
         // Set the turning direction to a binary integer 
@@ -266,7 +266,6 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
     int iter = 0;
     double threshold = 1e-7;
     double gamma = 0.00001; // penalty hyperparameter
-    
     while (iter++ < max_iterations) {
         double max_change_in_value = 0.0;
 
@@ -448,8 +447,9 @@ std::vector<ob::State *> extractPathFromPolicy(
     double radius) 
 {
     std::vector<std::tuple<ob::State *, double, double, int>> path;
-    ob::State *current = start;
 
+    double delta = 0.0;
+    double r = 0.0;
     ompl::RNG rng;
 
     double delta_0 = 0.5;
@@ -458,17 +458,14 @@ std::vector<ob::State *> extractPathFromPolicy(
     double sigma_delta_1 = 0.2;
     double sigma_r_0 = 0.5;
     double sigma_r_1 = 1.0;
+    int u = best_actions[start];
 
-    // Starting after the start state, provide delta and r values
-    double delta = -1;
-    double r = -1;
-    int u = -1;
+    ob::State *current = start;
 
     int max_iterations = 100; // Arbitrary stopping point
     int iter = 0;
     ob::State *temp = si->allocState();
     while (iter++ < max_iterations) {
-        u = best_actions.at(current);
         if (u == 0) {
             delta = rng.gaussian(delta_0, sigma_delta_0);
             r = rng.gaussian(r_0, sigma_r_0);
@@ -477,20 +474,37 @@ std::vector<ob::State *> extractPathFromPolicy(
             r = rng.gaussian(r_0, sigma_r_1);
         }
 
+        path.push_back(std::make_tuple(current, delta, r, u));
+        
         propagateCircularArc(current, u, r, delta, temp);
+        
         if (!isCollisionFreePath(current, temp, u, r, delta, si)) {
             // Stop when collision detected
+            path.push_back(std::make_tuple(si->cloneState(temp), -1, -1, -1));
             si->freeState(temp);
             return path;
         }
         
-        path.push_back(std::make_tuple(si->cloneState(temp), delta, r, u));
         if (isGoalReachable(temp, goal, radius, si)) {
             // Stop when a successful path is found
+            path.push_back(std::make_tuple(si->cloneState(temp), -1, -1, -1));
             si->freeState(temp);
             return path;
         }
-        current = nn->nearest(temp);
+        ob::State *near = nn->nearest(temp);
+        if (best_actions.find(near) == best_actions.end()) {
+            // The nearest vertex in the roadmap is in the goal but the point itself is not in the goal.
+            // best_actions will not have an optimal policy for goal states.
+            // For this edge case, choose a random action.
+            ompl::RNG rng;
+            u = floor(rng.uniformReal(0, 2));
+        } else {
+            u = best_actions.at(near);
+        }
+        current = si->cloneState(temp);
+    }
+    if (current != start) {
+        si->freeState(current);
     }
     si->freeState(temp);
     return path;
@@ -582,7 +596,6 @@ int main(int argc, char* argv[]) {
     });
     // Add start and goal states to vertices
     nn->add(start);
-    nn->add(goal);
 
     // Define actions
     std::vector<int> U = {0, 1}; // 0 means turn left, 1 means turn right
@@ -621,7 +634,7 @@ int main(int argc, char* argv[]) {
     // Obtain optimal policy by querying SMR using value iteration
     std::unordered_map<ob::State *, int> best_actions;
     std::unordered_map<ob::State *, double> values;
-    double radius = 0.1;
+    double radius = 1;
     std::tie(best_actions, values) = querySMR(smr, goal, OBS_STATE, radius, si);
 
     if (run_experiment <= 0) {
@@ -661,7 +674,6 @@ int main(int argc, char* argv[]) {
         int successCount = 0;
         for (int k = 0; k < 1000; k++) {
             // Extract and print the path
-            //std::vector<ob::State *> path = extractPathFromPolicy(si, start, goal, best_actions, smr, verbose,policy);
             path = simulatePath(nn, best_actions, si, start, goal, radius); 
             if (!path.empty()) {
                 ob::State *state = std::get<0>(path.back());
@@ -680,6 +692,13 @@ int main(int argc, char* argv[]) {
                     double x, y, theta;
                     std::tie(x, y, theta) = getCoord(state);
                     std::cout << "(" << x << ", " << y << ", " << theta << ")" << " with arc length " << delta << " and radius " << r << std::endl;
+                }
+            }
+            // Free memory in path
+            for (auto tuple: path) {
+                ob::State *state = std::get<0>(tuple);
+                if (state && state != start) {
+                    si->freeState(state);
                 }
             }
         }
@@ -710,6 +729,14 @@ int main(int argc, char* argv[]) {
             pathFile.close();
             std::cout << "Written to path.txt" << std::endl;
         }
+
+        // Free memory in path
+        for (auto tuple: path) {
+            ob::State *state = std::get<0>(tuple);
+            if (state && state != start) {
+                si->freeState(state);
+            }
+        }
     }
     
     // Free memory in roadmap
@@ -724,10 +751,9 @@ int main(int argc, char* argv[]) {
         si->freeState(OBS_STATE);
     }
 
-    // Free memory in path
-    for (auto tuple: path) {
-        ob::State *state = std::get<0>(tuple);
-        si->freeState(state);
+    // Free goal state
+    if (goal) {
+        si->freeState(goal);
     }
 
     return 0;

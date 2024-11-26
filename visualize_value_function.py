@@ -16,11 +16,10 @@ def visualize_value_function(states, values):
             cellx = 9
         if y == 0.5:
             celly = 9
-        value_grid[cellx, celly] += value
-        value_grid_count[cellx, celly] += 1
+        value_grid[celly, cellx] += value
+        value_grid_count[celly, cellx] += 1
 
-    value_grid /= value_grid_count
-    # ticklabels = ["{:.1f}".format(0.1*x-0.5) for x in range(10)]
+    value_grid = np.where(value_grid_count != 0, value_grid / value_grid_count, 0)
     ticklabels = [i for i in range(10)]
 
     ax = sns.heatmap(value_grid, cmap="plasma", xticklabels=ticklabels, yticklabels=ticklabels)
