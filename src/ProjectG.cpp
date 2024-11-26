@@ -240,79 +240,70 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
     ob::SpaceInformationPtr si)
 {
     // Build transition probability matrix
-    std::unordered_map<int, std::map<ob::State *, std::map<ob::State *, double>>> prob;
-     
+    std::unordered_map<int, std::unordered_map<ob::State *, std::vector<std::pair<ob::State *, double>>>> prob;
     for (const auto roadmap: SMR) {
         int u = roadmap.first;
-        std::map<ob::State *, std::map<ob::State *, double>> matrix;
         for (auto edge : roadmap.second.edges) {
-            (matrix[edge.source])[edge.target] = edge.prob;
+            prob[u][edge.source].emplace_back(edge.target, edge.prob);
         }
-        prob[u] = matrix;
     }
 
-    // Value iteration
-
-    // Initialize values
-    std::unordered_map<ob::State *, double> values;
-    std::unordered_map<ob::State *, double> reward;
+    // Initialize values and rewards
+    std::unordered_map<ob::State *, double> values, reward;
     std::vector<ob::State *> states;
-    SMR[0].vertices->list(states);
+    SMR.at(0).vertices->list(states);
+
     for (const auto &state : states) {
-        values[state] = 0;
-        if (isGoalReachable(state, goal, radius, si)) {
-            reward[state] = 1;
-        }
+        values[state] = 0.0;
+        reward[state] = isGoalReachable(state, goal, radius, si) ? 1.0 : 0.0;
     }
 
     // Initialize data structure to hold the best actions for each state
     std::unordered_map<ob::State *, int> best_actions;
     
-    int max_iterations = states.size();
-    bool stop = false;
+    int max_iterations = static_cast<int>(states.size());
     std::unordered_map<ob::State *, double> new_values;
     int iter = 0;
     double threshold = 1e-7;
     double gamma = 0.00001; // penalty hyperparameter
-    while (!stop && iter < max_iterations) {
-        iter++;
-        double max_change_in_value = 0;
+    
+    while (iter++ < max_iterations) {
+        double max_change_in_value = 0.0;
+
         for (const auto &state : states) {
+            double R = reward[state];
             // It is assumed that when the robot reaches a goal or obstacle state, it stops
-            if (reward[state] == 1 || state == OBS_STATE) {
-                new_values[state] = reward[state];
-                if (new_values[state] - values[state] > max_change_in_value) {
-                    max_change_in_value = new_values[state] - values[state];
-                }
+            if (R == 1 || state == OBS_STATE) {
+                new_values[state] = R;
+                max_change_in_value = std::max(std::abs(new_values[state] - values[state]), max_change_in_value);
                 continue;
             }
 
-            double maxExpectedValue = 0;
-            for (const auto roadmap: SMR) {
-                int u = roadmap.first;
-                double exp_val = 0;
-                for (auto pair : prob[u][state]) {
+            double maxExpectedValue = 0.0;
+            for (const auto &actionPair : prob) {
+                int u = actionPair.first;
+                double exp_val = 0.0;
+                for (const auto &pair : actionPair.second.at(state)) {
                     // pair.first accesses a state that transitions from the current state
                     // pair.second provides the probability from the current state to the next
                     ob::State *next = pair.first;
                     double probability = pair.second;
                     exp_val += probability*(values[next]-gamma);
                 }
-                maxExpectedValue = std::max(maxExpectedValue, exp_val);
 
                 // If better action is found, update best_actions
-                if (maxExpectedValue == exp_val) {
+                if (exp_val > maxExpectedValue) {
+                    maxExpectedValue = exp_val;
                     best_actions[state] = u;
                 }
             }
-            new_values[state] = reward[state] + maxExpectedValue;
-
-            if (new_values[state] - values[state] > max_change_in_value) {
-                max_change_in_value = new_values[state] - values[state];
-            }
+            new_values[state] = R + maxExpectedValue;
+            max_change_in_value = std::max(std::abs(new_values[state] - values[state]), max_change_in_value);
         }
-        values = new_values;
+        values.swap(new_values);
+
         // Stop if the max change between the old and new value for every state is below threshold
+        std::cout << max_change_in_value << std::endl;
         if (max_change_in_value < threshold) {
             break;
         }
