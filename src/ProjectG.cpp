@@ -228,16 +228,18 @@ std::unordered_map<int, Graph> buildSMR(
     return SMR;
 }
 
-bool isGoalReachable(ob::State *q, ob::State *goal, double radius, ob::SpaceInformationPtr si) {
-    return si->distance(q, goal) <= radius;
+bool isGoalReachable(ob::State *q, ob::State *goal, double radius) {
+    double qx, qy, gx, gy;
+    std::tie(qx, qy, std::ignore) = getCoord(q);
+    std::tie(gx, gy, std::ignore) = getCoord(goal);
+    return pow(qx-gx, 2) + pow(qy-gy, 2) <= pow(radius, 2);
 }
 
 std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *, double>> querySMR(
     std::unordered_map<int, Graph> SMR, 
     ob::State *goal, 
     ob::State *OBS_STATE, 
-    double radius, 
-    ob::SpaceInformationPtr si)
+    double radius)
 {
     // Build transition probability matrix
     std::unordered_map<int, std::unordered_map<ob::State *, std::vector<std::pair<ob::State *, double>>>> prob;
@@ -255,13 +257,18 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
 
     for (const auto &state : states) {
         values[state] = 0.0;
-        reward[state] = isGoalReachable(state, goal, radius, si) ? 1.0 : 0.0;
+        reward[state] = isGoalReachable(state, goal, radius) ? 1.0 : 0.0;
     }
+
+    // Set values and rewards for OBS_STATE
+    values[OBS_STATE] = 0.0;
+    reward[OBS_STATE] = 0.0;
 
     // Initialize data structure to hold the best actions for each state
     std::unordered_map<ob::State *, int> best_actions;
     
     int max_iterations = static_cast<int>(states.size());
+    // int max_iterations = 2;
     std::unordered_map<ob::State *, double> new_values;
     int iter = 0;
     double threshold = 1e-7;
@@ -271,7 +278,7 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
 
         for (const auto &state : states) {
             double R = reward[state];
-            // It is assumed that when the robot reaches a goal or obstacle state, it stops
+            // It is assumed that when the robot reaches a goal or hits an obstacle, it stops
             if (R == 1 || state == OBS_STATE) {
                 new_values[state] = R;
                 max_change_in_value = std::max(std::abs(new_values[state] - values[state]), max_change_in_value);
@@ -318,33 +325,33 @@ std::tuple<std::unordered_map<ob::State *, int>, std::unordered_map<ob::State *,
 void makeEnvironment(std::vector<Rectangle> &  obstacles )
 {
     // Fill in the vector of rectangles with your street environment.
+    // Rectangle obs1;
+    // obs1.x = 3;
+    // obs1.y = 6;
+    // obs1.width = 3;
+    // obs1.height = 2;
+    // obstacles.push_back(obs1);
+   
+    // Rectangle obs2;
+    // obs2.x = 3;
+    // obs2.y = 3;
+    // obs2.width = 2;
+    // obs2.height = 1;
+    // obstacles.push_back(obs2);
+
     Rectangle obs1;
     obs1.x = 3;
-    obs1.y = 6;
-    obs1.width = 3;
-    obs1.height = 2;
+    obs1.y = 4.5;
+    obs1.width= 2;
+    obs1.height= 2;
     obstacles.push_back(obs1);
    
     Rectangle obs2;
     obs2.x = 3;
-    obs2.y = 3;
-    obs2.width = 2;
-    obs2.height = 1;
+    obs2.y= 3;
+    obs2.width=2;
+    obs2.height=1;
     obstacles.push_back(obs2);
-
-    // Rectangle obs1;
-    // obs1.x =-.5;
-    // obs1.y=-.5;
-    // obs1.width=1;
-    // obs1.height=.05;
-    // obstacles.push_back(obs1);
-   
-    // Rectangle obs2;
-    // obs2.x =-.5;
-    // obs2.y=.45;
-    // obs2.width=1;
-    // obs2.height=.05;
-    // obstacles.push_back(obs2);
     
     // Rectangle obs3;
     // obs3.x =-.5;
@@ -485,7 +492,7 @@ std::vector<ob::State *> extractPathFromPolicy(
             return path;
         }
         
-        if (isGoalReachable(temp, goal, radius, si)) {
+        if (isGoalReachable(temp, goal, radius)) {
             // Stop when a successful path is found
             path.push_back(std::make_tuple(si->cloneState(temp), -1, -1, -1));
             si->freeState(temp);
@@ -635,7 +642,7 @@ int main(int argc, char* argv[]) {
     std::unordered_map<ob::State *, int> best_actions;
     std::unordered_map<ob::State *, double> values;
     double radius = 1;
-    std::tie(best_actions, values) = querySMR(smr, goal, OBS_STATE, radius, si);
+    std::tie(best_actions, values) = querySMR(smr, goal, OBS_STATE, radius);
 
     if (run_experiment <= 0) {
         std::ofstream valuesFile("values.txt");
@@ -677,7 +684,7 @@ int main(int argc, char* argv[]) {
             path = simulatePath(nn, best_actions, si, start, goal, radius); 
             if (!path.empty()) {
                 ob::State *state = std::get<0>(path.back());
-                if (isGoalReachable(state, goal, radius, si)) {
+                if (isGoalReachable(state, goal, radius)) {
                     // This path reached the goal
                     successCount++;
                 }

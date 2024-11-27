@@ -1,33 +1,24 @@
 import matplotlib.pyplot as plt
-import math
-
-def openFile(filepath):
-    with open(filepath) as f:
-        lines = f.readlines()
-        mean = 0
-        sd = 0
-        for line in lines:
-            mean += float(line)
-
-        mean /= len(lines)
-        for line in lines:
-            sd += (float(line) - mean)**2
-        
-        sd = math.sqrt(sd/len(lines))
-        return mean, sd
+import numpy as np
 
 if __name__ == '__main__':
-    means = []
-    sds = []
-    sample_sizes = [1000, 10000, 100000, 1000000]
-    for n in sample_sizes:
-        for i in range(20):
-            mean, sd = openFile(f"experiments/output{n}.txt")
-            mean.append(mean)
-            sds.append(sd)
+    means = np.zeros(3)
+    sds = np.zeros(3)
+    sample_sizes = [1000, 10000, 100000]
+    for index, n in enumerate(sample_sizes):
+        data = []
+        with open(f"output{n}.txt") as f:
+            lines = f.readlines()
+            for line in lines:
+                data.append(float(line))
+        data = np.array(data)
+        means[index] = np.mean(data)
+        sds[index] = np.sqrt(np.sum((data - means[index]))**2/20)
 
+
+    print(means, sds)
     fig, ax = plt.subplots()
-    ax.errorbar(sample_sizes, means, sds, linestyle='None', fmt='o')
+    ax.errorbar(np.log10(sample_sizes), means, sds, linestyle='None', fmt='o')
     ax.set_ylabel("Mean difference: Actual vs Expected Probability")
     ax.set_xlabel("Log(Sample Size)")
     ax.set_title("Experiment 2")
