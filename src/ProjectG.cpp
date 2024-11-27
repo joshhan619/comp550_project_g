@@ -332,25 +332,25 @@ void makeEnvironment(std::vector<Rectangle> &  obstacles )
     // obs1.height = 2;
     // obstacles.push_back(obs1);
    
-    // Rectangle obs2;
-    // obs2.x = 3;
-    // obs2.y = 3;
-    // obs2.width = 2;
-    // obs2.height = 1;
-    // obstacles.push_back(obs2);
+    Rectangle obs2;
+    obs2.x = 2.5;
+    obs2.y = 4;
+    obs2.width = 1;
+    obs2.height = 2;
+    obstacles.push_back(obs2);
 
     Rectangle obs1;
-    obs1.x = 3;
-    obs1.y = 4.5;
-    obs1.width= 2;
+    obs1.x = 6;
+    obs1.y = 2;
+    obs1.width= 1;
     obs1.height= 2;
     obstacles.push_back(obs1);
    
-    Rectangle obs2;
-    obs2.x = 3;
-    obs2.y= 3;
-    obs2.width=2;
-    obs2.height=1;
+    //Rectangle obs2;
+    obs2.x = 6;
+    obs2.y= 4.5;
+    obs2.width=1;
+    obs2.height=2;
     obstacles.push_back(obs2);
     
     // Rectangle obs3;
@@ -582,7 +582,7 @@ int main(int argc, char* argv[]) {
     ob::State *start = si->allocState();
     ob::State *goal = si->allocState();
 
-    start->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setX(0);
+    start->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setX(1);
     start->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setY(4);
     start->as<NeedleStateSpace::StateType>()->as<ob::SE2StateSpace::StateType>(0)->setYaw(0);
     start->as<NeedleStateSpace::StateType>()->as<ob::RealVectorStateSpace::StateType>(1)->values[0] = 0;
@@ -679,6 +679,7 @@ int main(int argc, char* argv[]) {
     if (run_experiment > 0) {
         // Experiment 2: Test SMR's sensitivity to sample size n
         int successCount = 0;
+        std::ofstream pathFile("path.txt");
         for (int k = 0; k < 1000; k++) {
             // Extract and print the path
             path = simulatePath(nn, best_actions, si, start, goal, radius); 
@@ -690,6 +691,18 @@ int main(int argc, char* argv[]) {
                 }
             }
 
+            
+            if (pathFile.is_open()) {
+            for (auto &tuple: path) {
+                ob::State *state = std::get<0>(tuple);
+                double x, y, theta;
+                std::tie(x, y, theta) = getCoord(state);
+                double delta = std::get<1>(tuple);
+                double r = std::get<2>(tuple);
+                int u = std::get<3>(tuple);
+                pathFile << x << "," << y << "," << theta << "," << delta << "," << r << "," << u << std::endl;
+            }
+            pathFile <<"="<< std::endl;
             if (verbose) {
                 std::cout << "Path from start to goal:" << std::endl;
                 for (const auto &tuple : path) {
@@ -708,7 +721,8 @@ int main(int argc, char* argv[]) {
                     si->freeState(state);
                 }
             }
-        }
+        }}
+        pathFile.close();
         double actualProb = successCount / 1000.0;
         std::cout << "n = " << n << ". Actual probability is " << actualProb << ". Expected probability is " << values[start] << std::endl;
 
