@@ -3,7 +3,7 @@
 
 **Joshua Han (jh273@rice.edu) & Alan Huang (ah212@rice.du)**
 
-> For a brief intro plz look at [slide](../comp550_project_g/Document/COMP550%20Project%20G%20-%20Joshua,%20Alan.pdf), for detail result see [document](../comp550_project_g/Document/COMP550%20Project%20G%20Report.pdf)
+> For a brief intro plz look at [slide](Document/COMP550%20Project%20G%20-%20Joshua,%20Alan.pdf), for detail result see [document](Document/COMP550%20Project%20G%20Report.pdf)
 ---
 ## I: Project Statement
 
